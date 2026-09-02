@@ -7,12 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      includeAssets: ["favicon.png", "logo.png", "campus-bg.jpg"],
       manifest: {
         name: "JUASS Tablets Share",
         short_name: "JUASS Tablets",
         description: "Juaben Senior High School — tablet distribution and tracking",
-        theme_color: "#0b4f6c",
+        theme_color: "#14205c",
         background_color: "#ffffff",
         display: "standalone",
         start_url: "/",
