@@ -1,0 +1,584 @@
+:root {
+  /* JUASS crest palette: navy shield border/text, gold shield field, deep red ribbon accent */
+  --primary: #14205c;
+  --primary-dark: #0a1338;
+  --gold: #f0ad00;
+  --gold-dark: #c98e00;
+  --accent: #f0ad00;
+  --bg: #f5f4f0;
+  --card-bg: #ffffff;
+  --border: #e0ddd3;
+  --text: #1c2333;
+  --muted: #616a80;
+  --success: #1e7e34;
+  --warn: #a5710a;
+  --danger: #a4222b;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  background: var(--primary);
+  color: white;
+  padding: 10px 20px;
+  flex-wrap: wrap;
+  border-bottom: 3px solid var(--gold);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+
+.brand img {
+  height: 34px;
+  width: 34px;
+  border-radius: 50%;
+  background: white;
+  padding: 2px;
+}
+
+.nav {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.nav a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+}
+
+.nav a.active,
+.nav a:hover {
+  background: var(--gold);
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.page h2 {
+  margin-top: 0;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.field.grow {
+  flex: 1;
+}
+
+.field label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: white;
+  color: var(--text);
+}
+
+input:read-only,
+input:disabled {
+  background: #f0f2f4;
+  color: var(--muted);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 16px;
+}
+
+.search-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-link,
+.btn-icon {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9rem;
+  border-radius: var(--radius);
+  border: none;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: white;
+  padding: 10px 18px;
+}
+
+.btn-primary:hover {
+  background: var(--primary-dark);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 16px;
+}
+
+.btn-secondary:hover {
+  border-color: var(--primary);
+}
+
+.btn-link {
+  background: none;
+  color: var(--primary);
+  padding: 4px 6px;
+  text-decoration: underline;
+}
+
+.btn-icon {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 1rem;
+}
+
+.scan-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.scan-input-row input {
+  flex: 1;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Campus photo (once added at client/public/campus-bg.jpg) shows through a
+     navy gradient for text contrast; if the file is absent this layer is
+     simply transparent and the plain gradient/solid colour below still renders. */
+  background-image: linear-gradient(160deg, rgba(20, 32, 92, 0.86), rgba(10, 19, 56, 0.93)), url("/campus-bg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: var(--primary-dark);
+  padding: 16px;
+}
+
+.login-card {
+  background: white;
+  padding: 32px;
+  border-radius: 12px;
+  border-top: 5px solid var(--gold);
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.login-logo {
+  height: 76px;
+  width: 76px;
+  margin-bottom: 10px;
+}
+
+.login-card h1 {
+  margin: 0 0 4px;
+  font-size: 1.3rem;
+  color: var(--primary);
+}
+
+.subtitle {
+  color: var(--muted);
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+}
+
+.login-card .btn-primary {
+  width: 100%;
+}
+
+.login-card .btn-link {
+  width: 100%;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.success-text {
+  color: var(--success);
+  font-size: 0.9rem;
+}
+
+.warn-text {
+  color: var(--warn);
+  font-size: 0.9rem;
+}
+
+.hint-text {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.disabled-form {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #eee;
+}
+
+.badge-active {
+  background: #e3f6e5;
+  color: var(--success);
+}
+
+.badge-warn {
+  background: #fff4d9;
+  color: var(--warn);
+}
+
+.badge-neutral {
+  background: #e6eaee;
+  color: var(--muted);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  background: #f0f4f7;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.actions-cell {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scanner-video {
+  width: 100%;
+  border-radius: var(--radius);
+  background: black;
+}
+
+.report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.issue-photo {
+  max-width: 240px;
+  border-radius: var(--radius);
+  margin-top: 8px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.stat-warn .stat-value {
+  color: var(--warn);
+}
+
+.stat-active .stat-value {
+  color: var(--success);
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
+.student-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.import-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.offline-banner {
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.banner-offline {
+  background: #fff4d9;
+  color: var(--warn);
+}
+
+.banner-syncing {
+  background: #e3f6e5;
+  color: var(--success);
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  height: 60vh;
+}
+
+.chat-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.chat-contact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.chat-contact:hover,
+.chat-contact.active {
+  background: var(--bg);
+}
+
+.contact-role {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-bubble {
+  max-width: 70%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #eef2f5;
+}
+
+.chat-bubble.sent {
+  align-self: flex-end;
+  background: var(--primary);
+  color: white;
+}
+
+.chat-bubble p {
+  margin: 0;
+}
+
+.chat-time {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chat-input-row input {
+  flex: 1;
+}
+
+@media (max-width: 700px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .chat-contacts {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+}

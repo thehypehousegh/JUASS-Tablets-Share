@@ -1,0 +1,143 @@
+// JUASS Tablets Share — data model
+// NOTE: The actual admission-data Excel template was not supplied to the
+// assistant that generated this schema (only a photo of a device's S/N and
+// IMEI barcode label was). Core admission fields commonly used by Ghanaian
+// SHS registers are modelled explicitly below, and `Student.extraFields`
+// (raw JSON) captures any additional columns found in the real template at
+// import time via the column-mapping screen, so no data is lost even if the
+// real template has different/extra fields. Adjust the explicit fields to
+// match the real template once available.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  DISTRIBUTOR
+  SUPERVISOR
+}
+
+enum AssignmentStatus {
+  WITH_STUDENT
+  REPLACED
+  RETURNED
+}
+
+enum IssueType {
+  FAULTY
+  MISSING
+}
+
+enum IssueStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                     String    @id @default(cuid())
+  name                   String
+  email                  String    @unique
+  contact                String?
+  role                   Role
+  passwordHash           String
+  active                 Boolean   @default(true)
+  failedLoginAttempts    Int       @default(0)
+  lockedUntil            DateTime?
+  passwordResetRequested Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  assignments      DeviceAssignment[] @relation("DistributedBy")
+  reportedIssues   DeviceIssueReport[] @relation("ReportedBy")
+  reviewedIssues   DeviceIssueReport[] @relation("ReviewedBy")
+  sentMessages     ChatMessage[]       @relation("SentBy")
+  receivedMessages ChatMessage[]       @relation("ReceivedBy")
+}
+
+model Student {
+  id             String   @id @default(cuid())
+  indexNumber    String   @unique
+  fullName       String
+  gender         String?
+  dateOfBirth    DateTime?
+  className      String?
+  programme      String?
+  house          String?
+  guardianName   String?
+  guardianContact String?
+  admissionYear  String?
+  extraFields    Json?    // any additional imported admission-data columns
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  assignments DeviceAssignment[]
+}
+
+model DeviceAssignment {
+  id                String            @id @default(cuid())
+  student           Student           @relation(fields: [studentId], references: [id])
+  studentId         String
+  distributor       User              @relation("DistributedBy", fields: [distributorId], references: [id])
+  distributorId     String
+  imei              String
+  serialNumber      String
+  embossmentNumber  String?
+  dateAssigned      DateTime          @default(now())
+  replacementDate   DateTime?
+  returnedDate      DateTime?
+  status            AssignmentStatus  @default(WITH_STUDENT)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  issueReports DeviceIssueReport[]
+
+  @@index([studentId])
+  @@index([distributorId])
+  @@unique([imei])
+  @@unique([serialNumber])
+}
+
+model DeviceIssueReport {
+  id           String      @id @default(cuid())
+  type         IssueType
+  assignment   DeviceAssignment? @relation(fields: [assignmentId], references: [id])
+  assignmentId String?
+  description  String
+  photoUrl     String?
+  status       IssueStatus @default(PENDING)
+  reportedBy   User        @relation("ReportedBy", fields: [reportedById], references: [id])
+  reportedById String
+  reviewedBy   User?       @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model ChatMessage {
+  id          String    @id @default(cuid())
+  sender      User      @relation("SentBy", fields: [senderId], references: [id])
+  senderId    String
+  recipient   User      @relation("ReceivedBy", fields: [recipientId], references: [id])
+  recipientId String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([senderId, recipientId])
+  @@index([recipientId, senderId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
