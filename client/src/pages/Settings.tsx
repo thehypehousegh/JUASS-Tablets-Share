@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { apiDownload, apiGet, apiUpload, apiSend, ApiError } from "../api";
 
+interface SyncStatus {
+  enabled: boolean;
+  remoteUrl?: string;
+  intervalMinutes: number;
+  running: boolean;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+}
+
 export default function Settings() {
   const [totalTablets, setTotalTablets] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -8,10 +18,18 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
   useEffect(() => {
     apiGet("/settings/total-tablets").then((r) => setTotalTablets(r.totalTablets)).catch(() => null);
+    loadSyncStatus();
+    const interval = setInterval(loadSyncStatus, 30000);
+    return () => clearInterval(interval);
   }, []);
+
+  function loadSyncStatus() {
+    apiGet("/backup/sync-status").then(setSyncStatus).catch(() => null);
+  }
 
   async function saveTotal(e: React.FormEvent) {
     e.preventDefault();
@@ -71,6 +89,29 @@ export default function Settings() {
           {saving ? "Saving…" : "Save"}
         </button>
       </form>
+
+      {syncStatus?.enabled && (
+        <div className="card">
+          <h3>Automatic Cloud Sync</h3>
+          <p className="hint-text">
+            This is a local-network instance. Every {syncStatus.intervalMinutes} minute(s) it automatically pushes a
+            full copy of its data to <strong>{syncStatus.remoteUrl}</strong>, so nothing rests only on this machine
+            for long even while working with no internet.
+          </p>
+          {syncStatus.lastSuccessAt ? (
+            <p className="success-text">Last synced successfully: {new Date(syncStatus.lastSuccessAt).toLocaleString()}</p>
+          ) : (
+            <p className="warn-text">Not yet synced successfully since this server started.</p>
+          )}
+          {syncStatus.lastError && (
+            <p className="error-text">
+              Last attempt ({syncStatus.lastAttemptAt ? new Date(syncStatus.lastAttemptAt).toLocaleString() : ""})
+              failed: {syncStatus.lastError}. It will keep retrying automatically — this is expected while there's no
+              internet connection.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <h3>Backup & Sync</h3>

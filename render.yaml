@@ -30,3 +30,27 @@ services:
         value: Juaben Senior High School
       - key: SEED_ADMIN_PASSWORD
         sync: false
+      # Cloud photo storage for faulty-report photos — recommended on Render
+      # since the free plan has no persistent disk. Leave all of these blank
+      # to fall back to local disk (photos then won't survive a redeploy).
+      # See README "Storing faulty-report photos in the cloud".
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_PUBLIC_URL_BASE
+        sync: false
+      # Lets a local-network instance (e.g. running docker-compose at a
+      # distribution event with no internet) automatically push its data
+      # here once connectivity returns, instead of a human having to
+      # remember to export/import a backup. Set the SAME value here and on
+      # that local instance's SYNC_SECRET — this Render service only needs
+      # this one variable; REMOTE_SYNC_URL is set on the local side, not here.
+      - key: SYNC_SECRET
+        sync: false

@@ -78,20 +78,32 @@ docker build -t juass-tablets-share .
 docker run -p 4000:4000 --env-file server/.env juass-tablets-share
 ```
 
-## Hosting options ("local network now, internet later")
+## Hosting options: cloud instance + local-network instance
 
-This app is designed to run the exact same way in either place:
+This app is designed to run in two places at once, each solving a different
+problem:
 
-1. **On a school PC / local server, for LAN-only use.** Run
-   `docker compose up -d` (bundles Postgres + the app) or run the server
-   directly against a local Postgres install. Distributors on the school
-   Wi-Fi/LAN open it in a browser; no internet required day-to-day.
-2. **On a free/low-cost cloud host, reachable from anywhere.** Render's free
-   web service tier, paired with a free [Neon](https://neon.tech) Postgres
-   instance, is what this repo is set up for out of the box (see the next
-   section) — but any Docker-friendly host works the same way. This is what
-   lets a distributor record assignments from home, or a Supervisor check
-   the dashboard off-site.
+1. **A cloud instance (Render + Neon), reachable from anywhere.** This is
+   the durable, canonical copy of the school's data — lets a distributor
+   record assignments from home, a Supervisor check the dashboard off-site,
+   and is where data ultimately needs to live so it's never at risk from a
+   single machine failing.
+2. **A local-network instance, for distribution days with no internet at
+   the venue.** Run `docker compose up -d` on a laptop/PC brought to the
+   event (bundles Postgres + the app). Every distributor's phone/tablet
+   connects to that laptop over the venue's Wi-Fi/LAN — no internet needed
+   — and because they're all talking to the *same* live server, assignments,
+   the "one active device per student" rule, and IMEI/Serial uniqueness are
+   all enforced in real time across every distributor, exactly as if
+   everyone were online. (A lone distributor with no connectivity at all —
+   not even to that local server, e.g. filling in a form from home before
+   the event — is a separate, narrower case; see "Offline gaps for a single
+   device" below.)
+
+**These two are meant to run together, not as a choice between them:**
+the local instance handles the event itself, then automatically pushes its
+data to the cloud instance in the background (see "Keeping data off any one
+machine" below) so the event's data doesn't ride home on a single laptop.
 
 ### Deploying to Render + Neon
 
@@ -122,32 +134,78 @@ This app is designed to run the exact same way in either place:
    for its login email and password.
 5. Every push to the connected branch redeploys automatically.
 
-**Known limitation — photo uploads on Render's free tier:** faulty-device
-photos are stored to local disk (`server/uploads`). Render's free web
-service plan has no persistent disk, so uploaded files are lost on every
-redeploy/restart. The faulty/missing *report itself* (description, status,
-approval) is unaffected since that's all in Postgres — only the attached
-photo is at risk. If photo retention matters before you're ready to pay for
-a Render disk, the fix is swapping local disk storage for a free object
-store (e.g. Cloudflare R2 or Supabase Storage); ask and this can be wired
-in as a follow-up.
+### Storing faulty-report photos in the cloud
 
-**Moving data between the two / periodic sync:** Settings & Backup →
-"Download Full Backup" produces one JSON file with every table. Import that
-file into the other instance (same screen) to bring it up to date — imports
-are non-destructive upserts, so importing the same backup twice, or
-importing in either direction, is always safe. Use this to periodically push
-a local-network instance's data up to the cloud copy (or the reverse), and
-also just as an offline safety backup saved straight to a PC or phone.
-**The backup file contains password hashes — store it as carefully as you
-would the database itself.**
+Faulty-device photos default to local disk (`server/uploads`), which is
+fine on the local-network instance (that machine's disk is what's actually
+there) but is a problem on a host with no persistent disk — Render's free
+tier included — since uploaded files are then lost on every redeploy/restart.
 
-**Offline gaps in the field** (e.g. a distributor working somewhere with no
-signal): the Assign Device and Report Issue forms work as an installable
-PWA. If a submission can't reach the server, it's queued in the browser's
-local storage on that device and sent automatically once connectivity comes
-back (a banner at the top of the app shows what's still pending, with a
-manual "Sync now").
+Set these on an instance to store photos in S3-compatible cloud storage
+instead, so they get a stable URL reachable from anywhere and survive
+redeploys (works with [Cloudflare R2](https://developers.cloudflare.com/r2/)
+— 10GB free, no card required, recommended — or Backblaze B2, Supabase
+Storage, or AWS S3):
+
+```
+S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_PUBLIC_URL_BASE
+```
+
+Quick Cloudflare R2 setup: create a bucket, create an R2 API token
+(Account Home → R2 → Manage API Tokens) scoped to that bucket for
+`S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`, use
+`https://<account-id>.r2.cloudflarestorage.com` for `S3_ENDPOINT`, `auto`
+for `S3_REGION`, and enable the bucket's public access (Settings → Public
+Development URL, or a custom domain) for `S3_PUBLIC_URL_BASE`. Leave all six
+unset to keep using local disk.
+
+### Keeping data off any one machine
+
+Two mechanisms cover this, for two different situations:
+
+**A local-network instance auto-syncs to a cloud instance in the
+background**, so a full day's distribution data run on a single laptop
+doesn't stay only on that laptop. Set on the **local** instance:
+
+```
+REMOTE_SYNC_URL=https://<your-cloud-instance>       # e.g. the Render URL
+SYNC_SECRET=<a-long-random-shared-secret>
+SYNC_INTERVAL_MINUTES=5                              # default 5
+```
+
+and set the matching `SYNC_SECRET` on the **cloud** instance (nothing else
+needed there — it just needs to recognize pushes as authorized). Every few
+minutes the local instance pushes a full snapshot to the cloud instance's
+`POST /api/backup/sync`, authenticated by that shared secret, applied as a
+non-destructive upsert (safe to push the same data twice, or push out of
+order). If there's no internet, it just fails quietly and retries next
+interval — nothing crashes, and it catches up automatically the moment
+connectivity returns. Admin → Settings & Backup shows when it last
+succeeded. This is the mechanism doing the real work: it bounds how much
+data could ever be at risk from one machine to a few minutes' worth, not "a
+whole event."
+
+**Settings & Backup → "Download Full Backup"** is the manual, on-demand
+version of the same thing — produces one JSON file with every table,
+importable into any other instance (same screen). Useful as a one-off
+backup saved straight to a PC or phone, for moving data around by hand, or
+as a fallback wherever auto-sync isn't configured. **The backup file
+contains password hashes — store it as carefully as you would the database
+itself.**
+
+### Offline gaps for a single device
+
+For a distributor filling in the Assign Device or Report Issue form
+somewhere with no network at all — not even the local-network server (e.g.
+from home before an event, or a dead zone at the venue) — those two forms
+work as an installable PWA: a submission that can't reach the server is
+queued in that device's own local storage and sent automatically once it
+can reach the server again (a banner at the top of the app shows what's
+still pending, with a manual "Sync now"). This is a safety net for one
+device losing its connection, not a substitute for the local-network
+instance above when several distributors need to work together with no
+internet at all — that scenario needs everyone actually reaching a shared
+server, which per-device queuing alone can't provide.
 
 ## Branding assets
 

@@ -25,6 +25,15 @@ services:
       CORS_ORIGIN: http://localhost:5173
       UPLOAD_DIR: uploads
       SCHOOL_NAME: Juaben Senior High School
+      # This is a local-network deployment (e.g. a laptop at a distribution
+      # event with no internet). Set these so it automatically pushes its
+      # data to your cloud instance every few minutes — see .env.example for
+      # what these mean and how to generate SYNC_SECRET. Leave unset to run
+      # purely local with no auto-sync (use Settings > Download Full Backup
+      # manually instead).
+      REMOTE_SYNC_URL: ${REMOTE_SYNC_URL:-}
+      SYNC_SECRET: ${SYNC_SECRET:-}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-5}
     ports:
       - "4000:4000"
     volumes:

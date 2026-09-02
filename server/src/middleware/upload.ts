@@ -5,17 +5,11 @@ import path from "path";
 const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR || "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".heic"].includes(ext) ? ext : ".jpg";
-    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExt}`);
-  },
-});
-
+// Buffered in memory rather than written straight to disk: the route
+// handler decides where the photo actually ends up (local disk or cloud
+// object storage) via utils/storage.ts.
 export const uploadPhoto = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (/^image\//.test(file.mimetype)) cb(null, true);

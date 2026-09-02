@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { uploadPhoto } from "../middleware/upload";
+import { savePhoto } from "../utils/storage";
 
 const router = Router();
 router.use(requireAuth);
@@ -42,12 +43,14 @@ router.post(
     const assignment = await prisma.deviceAssignment.findUnique({ where: { id: parsed.data.assignmentId } });
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
 
+    const photoUrl = req.file ? await savePhoto(req.file.buffer, req.file.originalname, req.file.mimetype) : undefined;
+
     const report = await prisma.deviceIssueReport.create({
       data: {
         type: parsed.data.type,
         assignmentId: parsed.data.assignmentId,
         description: parsed.data.description,
-        photoUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
+        photoUrl,
         reportedById: req.user!.id,
       },
       include: { assignment: { include: { student: true } } },

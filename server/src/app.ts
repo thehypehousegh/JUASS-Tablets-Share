@@ -27,7 +27,9 @@ export function createApp() {
       credentials: true,
     })
   );
-  app.use(express.json({ limit: "5mb" }));
+  // Generous enough for a full-database backup payload pushed by the
+  // background sync job (see src/sync.ts) as the school's data grows.
+  app.use(express.json({ limit: "25mb" }));
   app.use(cookieParser());
   app.use("/uploads", express.static(uploadDir));
 

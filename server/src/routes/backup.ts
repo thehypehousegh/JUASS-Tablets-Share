@@ -1,41 +1,33 @@
 import { Router } from "express";
-import { prisma } from "../db";
-import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { uploadJson } from "../middleware/upload";
+import { asyncHandler } from "../utils/asyncHandler";
+import { applyBackup, BACKUP_VERSION, buildBackupPayload } from "../utils/backup";
+import { secretsMatch } from "../utils/secret";
+import { getSyncStatus } from "../sync";
 
 const router = Router();
-router.use(requireAuth, requireRole("SUPER_ADMIN"));
 
-const BACKUP_VERSION = 1;
+router.get(
+  "/sync-status",
+  requireAuth,
+  requireRole("SUPER_ADMIN"),
+  (_req, res) => {
+    res.json(getSyncStatus());
+  }
+);
 
 // Full snapshot of every table, downloadable straight to the admin's device
 // (PC or mobile browser). Used both as an offline safety backup and as the
-// mechanism to periodically move data between a local-network instance and
-// an internet-hosted instance: export on one, import on the other.
+// manual way to move data between a local-network instance and an
+// internet-hosted one. See POST /sync below for the automatic version of
+// this used by local-network deployments.
 router.get(
   "/export",
+  requireAuth,
+  requireRole("SUPER_ADMIN"),
   asyncHandler(async (_req, res) => {
-    const [users, students, assignments, issueReports, chatMessages, settings] = await Promise.all([
-      prisma.user.findMany(),
-      prisma.student.findMany(),
-      prisma.deviceAssignment.findMany(),
-      prisma.deviceIssueReport.findMany(),
-      prisma.chatMessage.findMany(),
-      prisma.setting.findMany(),
-    ]);
-
-    const backup = {
-      version: BACKUP_VERSION,
-      exportedAt: new Date().toISOString(),
-      users,
-      students,
-      assignments,
-      issueReports,
-      chatMessages,
-      settings,
-    };
-
+    const backup = await buildBackupPayload();
     res.setHeader("Content-Type", "application/json");
     res.setHeader(
       "Content-Disposition",
@@ -45,11 +37,10 @@ router.get(
   })
 );
 
-// Restore/merge: upserts every record by its original id, so importing the
-// same backup twice is safe. Existing local records not present in the
-// backup are left untouched (never destructive).
 router.post(
   "/import",
+  requireAuth,
+  requireRole("SUPER_ADMIN"),
   uploadJson.single("file"),
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Upload a backup .json file" });
@@ -62,39 +53,30 @@ router.post(
     if (!backup || backup.version !== BACKUP_VERSION) {
       return res.status(400).json({ error: "Unrecognized or incompatible backup file" });
     }
+    const counts = await applyBackup(backup);
+    res.json({ ok: true, imported: counts });
+  })
+);
 
-    const counts = { users: 0, students: 0, assignments: 0, issueReports: 0, chatMessages: 0, settings: 0 };
-
-    for (const u of backup.users || []) {
-      const { id, ...data } = u;
-      await prisma.user.upsert({ where: { id }, create: { id, ...data }, update: data });
-      counts.users++;
-    }
-    for (const s of backup.students || []) {
-      const { id, ...data } = s;
-      await prisma.student.upsert({ where: { id }, create: { id, ...data }, update: data });
-      counts.students++;
-    }
-    for (const a of backup.assignments || []) {
-      const { id, ...data } = a;
-      await prisma.deviceAssignment.upsert({ where: { id }, create: { id, ...data }, update: data }).catch(() => null);
-      counts.assignments++;
-    }
-    for (const r of backup.issueReports || []) {
-      const { id, ...data } = r;
-      await prisma.deviceIssueReport.upsert({ where: { id }, create: { id, ...data }, update: data }).catch(() => null);
-      counts.issueReports++;
-    }
-    for (const m of backup.chatMessages || []) {
-      const { id, ...data } = m;
-      await prisma.chatMessage.upsert({ where: { id }, create: { id, ...data }, update: data }).catch(() => null);
-      counts.chatMessages++;
-    }
-    for (const s of backup.settings || []) {
-      await prisma.setting.upsert({ where: { key: s.key }, create: s, update: { value: s.value } });
-      counts.settings++;
+// Machine-to-machine push, used by a local-network instance's background
+// sync job (see src/sync.ts) to keep an internet-hosted copy up to date
+// automatically, without a human ever needing to remember to export/import.
+// Authenticated by a shared secret (SYNC_SECRET) instead of a login session,
+// since there's no browser involved.
+router.post(
+  "/sync",
+  asyncHandler(async (req, res) => {
+    const expected = process.env.SYNC_SECRET;
+    if (!expected) return res.status(503).json({ error: "This instance does not accept automatic sync pushes" });
+    if (!secretsMatch(req.header("x-sync-secret"), expected)) {
+      return res.status(401).json({ error: "Invalid sync secret" });
     }
 
+    const backup = req.body;
+    if (!backup || backup.version !== BACKUP_VERSION) {
+      return res.status(400).json({ error: "Unrecognized or incompatible backup payload" });
+    }
+    const counts = await applyBackup(backup);
     res.json({ ok: true, imported: counts });
   })
 );
