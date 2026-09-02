@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { apiGet } from "../api";
 import OfflineSyncBanner from "./OfflineSyncBanner";
+import SyncStatusBadge from "./SyncStatusBadge";
 
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -95,17 +97,27 @@ export default function Layout() {
           </NavLink>
         </nav>
         <div className="user-menu">
+          <SyncStatusBadge />
           <span>
             {user.name} · {user.role.replace("_", " ")}
           </span>
           <button
             className="btn-secondary"
+            disabled={loggingOut}
             onClick={async () => {
-              await logout();
+              setLoggingOut(true);
+              const result = await logout();
+              if (result?.backedUpOnline === false) {
+                alert(
+                  "Your session couldn't be backed up online right now (no internet reaching the cloud copy). " +
+                    "It's saved safely on this machine and will sync automatically the next time there's internet — " +
+                    "or an Admin can retry it sooner from Settings & Backup."
+                );
+              }
               navigate("/login");
             }}
           >
-            Log out
+            {loggingOut ? "Syncing…" : "Log out"}
           </button>
         </div>
       </header>

@@ -4,17 +4,27 @@ import { uploadJson } from "../middleware/upload";
 import { asyncHandler } from "../utils/asyncHandler";
 import { applyBackup, BACKUP_VERSION, buildBackupPayload } from "../utils/backup";
 import { secretsMatch } from "../utils/secret";
-import { getSyncStatus } from "../sync";
+import { getSyncStatus, runSyncNow } from "../sync";
 
 const router = Router();
 
-router.get(
-  "/sync-status",
+// Visible to any logged-in role, not just Admin — a distributor should be
+// able to see for themselves whether their session's work has made it to
+// the cloud yet, not just be told about it once at logout.
+router.get("/sync-status", requireAuth, (_req, res) => {
+  res.json(getSyncStatus());
+});
+
+// Manual "retry now" — mainly for an Admin to press after confirming
+// internet is back, rather than waiting for the next scheduled tick.
+router.post(
+  "/sync-now",
   requireAuth,
   requireRole("SUPER_ADMIN"),
-  (_req, res) => {
+  asyncHandler(async (_req, res) => {
+    await runSyncNow();
     res.json(getSyncStatus());
-  }
+  })
 );
 
 // Full snapshot of every table, downloadable straight to the admin's device

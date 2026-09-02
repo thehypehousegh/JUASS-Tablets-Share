@@ -9,6 +9,8 @@ interface SyncStatus {
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastError?: string;
+  pendingBackupCount: number;
+  oldestPendingBackupAt?: string;
 }
 
 export default function Settings() {
@@ -19,6 +21,7 @@ export default function Settings() {
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     apiGet("/settings/total-tablets").then((r) => setTotalTablets(r.totalTablets)).catch(() => null);
@@ -29,6 +32,18 @@ export default function Settings() {
 
   function loadSyncStatus() {
     apiGet("/backup/sync-status").then(setSyncStatus).catch(() => null);
+  }
+
+  async function retrySyncNow() {
+    setRetrying(true);
+    try {
+      const res = await apiSend("POST", "/backup/sync-now");
+      setSyncStatus(res);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not retry sync");
+    } finally {
+      setRetrying(false);
+    }
   }
 
   async function saveTotal(e: React.FormEvent) {
@@ -103,6 +118,14 @@ export default function Settings() {
           ) : (
             <p className="warn-text">Not yet synced successfully since this server started.</p>
           )}
+          {syncStatus.pendingBackupCount > 0 && (
+            <p className="warn-text">
+              {syncStatus.pendingBackupCount} offline backup(s) saved on this machine, not yet delivered to the cloud
+              {syncStatus.oldestPendingBackupAt &&
+                ` (oldest from ${new Date(syncStatus.oldestPendingBackupAt).toLocaleString()})`}
+              . Everyone sees a "Not backed up" badge in the top bar until this clears.
+            </p>
+          )}
           {syncStatus.lastError && (
             <p className="error-text">
               Last attempt ({syncStatus.lastAttemptAt ? new Date(syncStatus.lastAttemptAt).toLocaleString() : ""})
@@ -110,6 +133,9 @@ export default function Settings() {
               internet connection.
             </p>
           )}
+          <button className="btn-secondary" onClick={retrySyncNow} disabled={retrying || syncStatus.running}>
+            {retrying || syncStatus.running ? "Syncing…" : "Retry Sync Now"}
+          </button>
         </div>
       )}
 

@@ -185,6 +185,42 @@ succeeded. This is the mechanism doing the real work: it bounds how much
 data could ever be at risk from one machine to a few minutes' worth, not "a
 whole event."
 
+On top of the timer, a sync also runs immediately at two extra moments,
+verified end-to-end against real instances:
+- **Whenever anyone logs out**, so a distributor's work is pushed right
+  after their session ends instead of waiting for the next tick. Logout
+  waits up to 8 seconds for that push to finish before it actually logs
+  them out, so it can tell them directly whether their session made it to
+  the cloud.
+- **Once more during a graceful shutdown** (`Ctrl-C`, `docker compose down`,
+  or any normal stop) — the server waits up to 20 seconds for one last sync
+  to finish before it actually exits, so closing up the system at the end
+  of a distribution day doesn't leave that last stretch of work stranded on
+  the laptop. This can only help on a *graceful* stop, though — it has no
+  chance to run if the machine loses power or is simply switched off
+  without stopping the app first, so it narrows the risk window, it doesn't
+  eliminate it.
+
+**When a push fails** (no internet reaching the cloud instance at that
+moment — the normal case mid-event), the data it was about to send is
+written to a file under `server/uploads/pending-sync/` instead of being
+discarded: a concrete, on-disk "offline backup" of that snapshot, not just
+a promise to try again. It's on disk (not just in memory), so it survives
+a server restart and keeps showing as pending until an actual successful
+push clears it out.
+
+Two things make this visible rather than a silent background retry:
+- **A badge in the top bar, shown to every logged-in role** — green
+  "Backed up online" when the last push succeeded and nothing is pending,
+  amber "Not backed up (N)" otherwise (hover for details). It only appears
+  at all on an instance where auto-sync is configured.
+- **Logging out with a failed/pending sync shows the distributor a direct
+  message** explaining their session is saved safely on the machine and
+  will go up automatically once there's internet, or that an Admin can push
+  it sooner. Admin → Settings & Backup shows the same detail plus a
+  "Retry Sync Now" button to force an attempt on demand (e.g. right after
+  confirming Wi-Fi is back).
+
 **Settings & Backup → "Download Full Backup"** is the manual, on-demand
 version of the same thing — produces one JSON file with every table,
 importable into any other instance (same screen). Useful as a one-off

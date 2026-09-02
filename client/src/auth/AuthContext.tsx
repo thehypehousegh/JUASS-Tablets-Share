@@ -10,11 +10,17 @@ export interface CurrentUser {
   role: Role;
 }
 
+export interface LogoutResult {
+  ok: boolean;
+  backedUpOnline: boolean | null;
+  pendingBackupCount: number;
+}
+
 interface AuthContextValue {
   user: CurrentUser | null;
   loading: boolean;
   login: (userId: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => Promise<LogoutResult | null>;
   refresh: () => Promise<void>;
 }
 
@@ -45,8 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    await apiSend("POST", "/auth/logout").catch(() => null);
+    const result = await apiSend("POST", "/auth/logout").catch(() => null);
     setUser(null);
+    return result as LogoutResult | null;
   }
 
   return (

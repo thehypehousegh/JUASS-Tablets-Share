@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { comparePassword } from "../utils/password";
 import { clearSession, issueSession, requireAuth } from "../middleware/auth";
+import { getSyncStatus, runSyncNow } from "../sync";
 
 const router = Router();
 const MAX_FAILED_ATTEMPTS = 5;
@@ -68,10 +69,29 @@ router.post(
   })
 );
 
-router.post("/logout", (_req, res) => {
-  clearSession(res);
-  res.json({ ok: true });
-});
+const LOGOUT_SYNC_TIMEOUT_MS = 8_000;
+
+router.post(
+  "/logout",
+  asyncHandler(async (_req, res) => {
+    clearSession(res);
+
+    // Push whatever this session worked on as soon as they log out, rather
+    // than waiting for the next scheduled sync tick — and tell them whether
+    // it actually made it to the cloud, so a distributor working offline
+    // knows their session isn't backed up yet rather than assuming it is.
+    // No-op (resolves immediately) if auto-sync isn't configured here.
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, LOGOUT_SYNC_TIMEOUT_MS));
+    await Promise.race([runSyncNow(), timeout]).catch(() => undefined);
+
+    const status = getSyncStatus();
+    res.json({
+      ok: true,
+      backedUpOnline: status.enabled ? !status.lastError && status.pendingBackupCount === 0 : null,
+      pendingBackupCount: status.pendingBackupCount,
+    });
+  })
+);
 
 router.get(
   "/me",
