@@ -12,7 +12,7 @@ interface Assignment {
   replacementDate: string | null;
   returnedDate: string | null;
   status: "WITH_STUDENT" | "REPLACED" | "RETURNED";
-  student: { indexNumber: string; fullName: string; className: string | null };
+  student: { indexNumber: string; fullName: string; className: string | null; admissionYear: string | null };
   distributor: { name: string };
 }
 
@@ -20,17 +20,27 @@ export default function Assignments() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
+  const [className, setClassName] = useState("");
+  const [year, setYear] = useState("");
+  const [classOptions, setClassOptions] = useState<string[]>([]);
+  const [yearOptions, setYearOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [replacing, setReplacing] = useState<Assignment | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  function buildParams() {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (status) params.set("status", status);
+    if (className) params.set("className", className);
+    if (year) params.set("year", year);
+    return params;
+  }
+
   async function load() {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (q) params.set("q", q);
-      if (status) params.set("status", status);
-      const data = await apiGet(`/assignments?${params.toString()}`);
+      const data = await apiGet(`/assignments?${buildParams().toString()}`);
       setAssignments(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load assignments");
@@ -41,6 +51,8 @@ export default function Assignments() {
 
   useEffect(() => {
     load();
+    apiGet("/students/classes").then(setClassOptions).catch(() => null);
+    apiGet("/students/years").then(setYearOptions).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -72,12 +84,28 @@ export default function Assignments() {
           <option value="REPLACED">Replaced</option>
           <option value="RETURNED">Returned</option>
         </select>
+        <select value={year} onChange={(e) => setYear(e.target.value)}>
+          <option value="">All year groups</option>
+          {yearOptions.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+        <select value={className} onChange={(e) => setClassName(e.target.value)}>
+          <option value="">All classes</option>
+          {classOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
         <button className="btn-secondary" onClick={load}>
           Filter
         </button>
         <button
           className="btn-secondary"
-          onClick={() => apiDownload(`/assignments/export/xlsx?${status ? `status=${status}` : ""}`, "assignments.xlsx")}
+          onClick={() => apiDownload(`/assignments/export/xlsx?${buildParams().toString()}`, "assignments.xlsx")}
         >
           Export to Excel
         </button>
@@ -94,6 +122,7 @@ export default function Assignments() {
                 <th>Index No.</th>
                 <th>Name</th>
                 <th>Class</th>
+                <th>Year Group</th>
                 <th>Distributor</th>
                 <th>IMEI</th>
                 <th>Serial No.</th>
@@ -109,6 +138,7 @@ export default function Assignments() {
                   <td>{a.student.indexNumber}</td>
                   <td>{a.student.fullName}</td>
                   <td>{a.student.className || "—"}</td>
+                  <td>{a.student.admissionYear || "—"}</td>
                   <td>{a.distributor.name}</td>
                   <td>{a.imei}</td>
                   <td>{a.serialNumber}</td>
@@ -133,7 +163,7 @@ export default function Assignments() {
               ))}
               {assignments.length === 0 && (
                 <tr>
-                  <td colSpan={10}>No assignments found.</td>
+                  <td colSpan={11}>No assignments found.</td>
                 </tr>
               )}
             </tbody>

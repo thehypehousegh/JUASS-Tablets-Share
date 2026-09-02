@@ -29,7 +29,7 @@ const READONLY_FIELDS: { key: keyof StudentRecord; label: string }[] = [
   { key: "house", label: "House / Hostel" },
   { key: "guardianName", label: "Guardian Name" },
   { key: "guardianContact", label: "Guardian Contact" },
-  { key: "admissionYear", label: "Admission Year" },
+  { key: "admissionYear", label: "Year Group (Batch)" },
 ];
 
 export default function AssignmentForm() {

@@ -7,6 +7,7 @@ import Assignments from "./pages/Assignments";
 import ReportIssue from "./pages/ReportIssue";
 import Approvals from "./pages/Approvals";
 import Dashboard from "./pages/Dashboard";
+import Students from "./pages/Students";
 import ImportStudents from "./pages/ImportStudents";
 import AdminUsers from "./pages/AdminUsers";
 import Settings from "./pages/Settings";
@@ -103,6 +104,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/students" element={<Students />} />
         <Route path="/chat" element={<Chat />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

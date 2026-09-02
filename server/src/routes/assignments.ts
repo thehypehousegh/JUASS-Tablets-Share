@@ -60,12 +60,14 @@ router.get(
     const q = req.query.q ? String(req.query.q) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const className = req.query.className ? String(req.query.className) : undefined;
+    const year = req.query.year ? String(req.query.year) : undefined;
 
     const assignments = await prisma.deviceAssignment.findMany({
       where: {
         status: status ? (status as "WITH_STUDENT" | "REPLACED" | "RETURNED") : undefined,
         student: {
           className: className || undefined,
+          admissionYear: year || undefined,
           OR: q
             ? [
                 { indexNumber: { contains: q, mode: "insensitive" } },
@@ -154,14 +156,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const status = req.query.status ? String(req.query.status) : undefined;
     const className = req.query.className ? String(req.query.className) : undefined;
+    const year = req.query.year ? String(req.query.year) : undefined;
 
     const assignments = await prisma.deviceAssignment.findMany({
       where: {
         status: status ? (status as "WITH_STUDENT" | "REPLACED" | "RETURNED") : undefined,
-        student: { className: className || undefined },
+        student: { className: className || undefined, admissionYear: year || undefined },
       },
       include: { student: true, distributor: { select: { name: true } } },
-      orderBy: [{ student: { className: "asc" } }, { student: { fullName: "asc" } }],
+      orderBy: [{ student: { admissionYear: "desc" } }, { student: { className: "asc" } }, { student: { fullName: "asc" } }],
     });
 
     const workbook = new ExcelJS.Workbook();
@@ -171,6 +174,7 @@ router.get(
       { header: "Full Name", key: "fullName", width: 28 },
       { header: "Gender", key: "gender", width: 10 },
       { header: "Class", key: "className", width: 12 },
+      { header: "Year Group", key: "admissionYear", width: 14 },
       { header: "Programme", key: "programme", width: 18 },
       { header: "House", key: "house", width: 14 },
       { header: "Guardian Name", key: "guardianName", width: 22 },
@@ -192,6 +196,7 @@ router.get(
         fullName: a.student.fullName,
         gender: a.student.gender ?? "",
         className: a.student.className ?? "",
+        admissionYear: a.student.admissionYear ?? "",
         programme: a.student.programme ?? "",
         house: a.student.house ?? "",
         guardianName: a.student.guardianName ?? "",

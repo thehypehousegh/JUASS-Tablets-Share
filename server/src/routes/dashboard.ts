@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth } from "../middleware/auth";
@@ -42,24 +43,36 @@ router.get(
   })
 );
 
+type StudentWithAssignment = Awaited<ReturnType<typeof fetchStudentsWithAssignmentFlag>>[number];
+
+function fetchStudentsWithAssignmentFlag(where: Prisma.StudentWhereInput) {
+  return prisma.student.findMany({
+    where,
+    include: {
+      assignments: { where: { status: { in: ["WITH_STUDENT", "REPLACED"] } }, take: 1, orderBy: { createdAt: "desc" } },
+    },
+  });
+}
+
+function groupByKey(students: StudentWithAssignment[], keyOf: (s: StudentWithAssignment) => string) {
+  const groups = new Map<string, { assigned: StudentWithAssignment[]; notReceived: StudentWithAssignment[] }>();
+  for (const s of students) {
+    const key = keyOf(s);
+    if (!groups.has(key)) groups.set(key, { assigned: [], notReceived: [] });
+    const bucket = groups.get(key)!;
+    if (s.assignments.length > 0) bucket.assigned.push(s);
+    else bucket.notReceived.push(s);
+  }
+  return groups;
+}
+
 router.get(
   "/by-class",
-  asyncHandler(async (_req, res) => {
-    const students = await prisma.student.findMany({
-      include: {
-        assignments: { where: { status: { in: ["WITH_STUDENT", "REPLACED"] } }, take: 1, orderBy: { createdAt: "desc" } },
-      },
-    });
+  asyncHandler(async (req, res) => {
+    const year = req.query.year ? String(req.query.year) : undefined;
+    const students = await fetchStudentsWithAssignmentFlag(year ? { admissionYear: year } : {});
 
-    const byClass = new Map<string, { assigned: typeof students; notReceived: typeof students }>();
-    for (const s of students) {
-      const cls = s.className || "Unassigned Class";
-      if (!byClass.has(cls)) byClass.set(cls, { assigned: [], notReceived: [] });
-      const bucket = byClass.get(cls)!;
-      if (s.assignments.length > 0) bucket.assigned.push(s);
-      else bucket.notReceived.push(s);
-    }
-
+    const byClass = groupByKey(students, (s) => s.className || "Unassigned Class");
     const result = Array.from(byClass.entries())
       .map(([className, bucket]) => ({
         className,
@@ -69,6 +82,26 @@ router.get(
         notReceivedStudents: bucket.notReceived.map((s) => ({ indexNumber: s.indexNumber, fullName: s.fullName })),
       }))
       .sort((a, b) => a.className.localeCompare(b.className));
+
+    res.json(result);
+  })
+);
+
+router.get(
+  "/by-year",
+  asyncHandler(async (_req, res) => {
+    const students = await fetchStudentsWithAssignmentFlag({});
+
+    const byYear = groupByKey(students, (s) => s.admissionYear || "Unspecified Year Group");
+    const result = Array.from(byYear.entries())
+      .map(([yearGroup, bucket]) => ({
+        yearGroup,
+        assignedCount: bucket.assigned.length,
+        notReceivedCount: bucket.notReceived.length,
+        assignedStudents: bucket.assigned.map((s) => ({ indexNumber: s.indexNumber, fullName: s.fullName })),
+        notReceivedStudents: bucket.notReceived.map((s) => ({ indexNumber: s.indexNumber, fullName: s.fullName })),
+      }))
+      .sort((a, b) => b.yearGroup.localeCompare(a.yearGroup));
 
     res.json(result);
   })

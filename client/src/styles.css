@@ -172,6 +172,14 @@ input:disabled {
   align-items: center;
 }
 
+.filter-row-spaced {
+  margin-bottom: 12px;
+}
+
+.section-heading {
+  margin-top: 32px;
+}
+
 .btn-primary,
 .btn-secondary,
 .btn-link,

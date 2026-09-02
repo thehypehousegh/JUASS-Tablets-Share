@@ -21,7 +21,7 @@ const STUDENT_FIELDS = [
   { key: "house", label: "House / Hostel", required: false },
   { key: "guardianName", label: "Guardian Name", required: false },
   { key: "guardianContact", label: "Guardian Contact", required: false },
-  { key: "admissionYear", label: "Admission Year", required: false },
+  { key: "admissionYear", label: "Year Group (Batch)", required: false },
 ] as const;
 
 router.get("/fields", (_req, res) => res.json(STUDENT_FIELDS));
@@ -31,6 +31,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = String(req.query.q || "").trim();
     const className = req.query.className ? String(req.query.className) : undefined;
+    const year = req.query.year ? String(req.query.year) : undefined;
     const students = await prisma.student.findMany({
       where: {
         AND: [
@@ -43,10 +44,12 @@ router.get(
               }
             : {},
           className ? { className } : {},
+          year ? { admissionYear: year } : {},
         ],
       },
-      take: 50,
-      orderBy: { fullName: "asc" },
+      include: { assignments: { where: { status: { in: ["WITH_STUDENT", "REPLACED"] } }, take: 1, orderBy: { createdAt: "desc" } } },
+      take: 200,
+      orderBy: [{ admissionYear: "desc" }, { className: "asc" }, { fullName: "asc" }],
     });
     res.json(students);
   })
@@ -61,6 +64,23 @@ router.get(
       distinct: ["className"],
     });
     res.json(rows.map((r) => r.className).filter(Boolean).sort());
+  })
+);
+
+router.get(
+  "/years",
+  asyncHandler(async (_req, res) => {
+    const rows = await prisma.student.findMany({
+      where: { admissionYear: { not: null } },
+      select: { admissionYear: true },
+      distinct: ["admissionYear"],
+    });
+    res.json(
+      rows
+        .map((r) => r.admissionYear)
+        .filter((y): y is string => !!y)
+        .sort((a, b) => b.localeCompare(a))
+    );
   })
 );
 

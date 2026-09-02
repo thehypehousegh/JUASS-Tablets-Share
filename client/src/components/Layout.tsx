@@ -62,6 +62,9 @@ export default function Layout() {
               Report Faulty/Missing
             </NavLink>
           )}
+          <NavLink to="/students" className={({ isActive }) => (isActive ? "active" : "")}>
+            Student Records
+          </NavLink>
           {isSupervisor && (
             <NavLink to="/dashboard" className={({ isActive }) => (isActive ? "active" : "")}>
               Dashboard
