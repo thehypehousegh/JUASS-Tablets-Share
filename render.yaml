@@ -1,0 +1,32 @@
+# Render Blueprint for JUASS Tablets Share.
+# Deploy: on render.com, "New +" -> "Blueprint", connect this repo/branch,
+# and Render reads this file automatically.
+#
+# The database is an external Neon Postgres instance (not a Render-managed
+# database), so DATABASE_URL is left for you to paste in by hand on first
+# deploy (Render dashboard -> this service -> Environment). Everything else
+# is wired up here.
+
+services:
+  - type: web
+    name: juass-tablets-share
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: UPLOAD_DIR
+        value: uploads
+      - key: SCHOOL_NAME
+        value: Juaben Senior High School
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
