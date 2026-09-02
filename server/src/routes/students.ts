@@ -106,6 +106,8 @@ router.post(
     const isCsv = /\.csv$/i.test(req.file.originalname) || req.file.mimetype === "text/csv";
 
     let rows: Record<string, unknown>[] = [];
+    let sheetName: string | undefined;
+
     if (isCsv) {
       const records: Record<string, string>[] = parseCsv(req.file.buffer, {
         columns: true,
@@ -117,8 +119,19 @@ router.post(
     } else {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(req.file.buffer as unknown as ArrayBuffer);
-      const sheet = workbook.worksheets[0];
-      if (!sheet) return res.status(400).json({ error: "The file appears to be empty" });
+      const sheetNames = workbook.worksheets.map((w) => w.name);
+
+      const requestedSheet = req.body.sheet ? String(req.body.sheet) : undefined;
+      let sheet = requestedSheet ? workbook.getWorksheet(requestedSheet) : workbook.worksheets[0];
+
+      // More than one sheet and the caller hasn't said which one yet — ask,
+      // rather than silently importing whatever happens to be first.
+      if (!requestedSheet && sheetNames.length > 1) {
+        return res.json({ needsSheetSelection: true, sheets: sheetNames });
+      }
+      if (!sheet) return res.status(400).json({ error: `Sheet "${requestedSheet}" was not found in this file` });
+
+      sheetName = sheet.name;
       const headerRow = sheet.getRow(1).values as unknown[];
       const headers = headerRow.slice(1).map((h) => String(h ?? "").trim());
       sheet.eachRow((row, rowNumber) => {
@@ -136,7 +149,7 @@ router.post(
 
     if (rows.length === 0) return res.status(400).json({ error: "The file appears to be empty" });
     const headers = Object.keys(rows[0]);
-    res.json({ headers, rowCount: rows.length, rows: rows.slice(0, 2000) });
+    res.json({ headers, rowCount: rows.length, rows: rows.slice(0, 2000), sheet: sheetName });
   })
 );
 
