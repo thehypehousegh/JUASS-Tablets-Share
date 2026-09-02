@@ -34,10 +34,16 @@ const READONLY_FIELDS: { key: keyof StudentRecord; label: string }[] = [
 
 export default function AssignmentForm() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "SUPER_ADMIN";
   const [indexNumber, setIndexNumber] = useState("");
   const [student, setStudent] = useState<StudentRecord | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  const [editing, setEditing] = useState(false);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [imei, setImei] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
@@ -61,6 +67,35 @@ export default function AssignmentForm() {
       setSearchError(err instanceof ApiError ? err.message : "Search failed");
     } finally {
       setSearching(false);
+    }
+  }
+
+  function startEditing() {
+    if (!student) return;
+    const values: Record<string, string> = {};
+    for (const f of READONLY_FIELDS) values[String(f.key)] = (student[f.key] as string) || "";
+    setEditValues(values);
+    setEditError(null);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!student) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const data: Record<string, string | null> = {};
+      for (const f of READONLY_FIELDS) {
+        const v = editValues[String(f.key)]?.trim() || "";
+        data[String(f.key)] = v || null;
+      }
+      const updated = await apiSend("PATCH", `/students/${student.id}`, data);
+      setStudent({ ...student, ...updated });
+      setEditing(false);
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : "Could not save changes");
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -148,7 +183,14 @@ export default function AssignmentForm() {
         <div className="card">
           <div className="form-header">
             <h3>{student.fullName}</h3>
-            {activeAssignment && <StatusBadge status="WITH_STUDENT" />}
+            <div className="actions-cell">
+              {activeAssignment && <StatusBadge status="WITH_STUDENT" />}
+              {isAdmin && !editing && (
+                <button type="button" className="btn-link" onClick={startEditing}>
+                  Edit Details
+                </button>
+              )}
+            </div>
           </div>
 
           {activeAssignment && (
@@ -158,22 +200,56 @@ export default function AssignmentForm() {
             </p>
           )}
 
-          <div className="grid-2">
-            <div className="field">
-              <label>Index Number</label>
-              <input type="text" value={student.indexNumber} readOnly />
-            </div>
-            {READONLY_FIELDS.map((f) => (
-              <div className="field" key={String(f.key)}>
-                <label>{f.label}</label>
-                <input type="text" value={(student[f.key] as string) || "—"} readOnly />
+          {editing ? (
+            <>
+              <p className="hint-text">
+                Correcting anomalies in this student's record. This does not affect their index number — edit that from
+                Student Records if it's wrong.
+              </p>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Index Number</label>
+                  <input type="text" value={student.indexNumber} readOnly />
+                </div>
+                {READONLY_FIELDS.map((f) => (
+                  <div className="field" key={String(f.key)}>
+                    <label>{f.label}</label>
+                    <input
+                      type="text"
+                      value={editValues[String(f.key)] || ""}
+                      onChange={(e) => setEditValues((v) => ({ ...v, [String(f.key)]: e.target.value }))}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-            <div className="field">
-              <label>Distributor Name</label>
-              <input type="text" value={user?.name || ""} readOnly />
+              {editError && <p className="error-text">{editError}</p>}
+              <div className="actions-cell">
+                <button type="button" className="btn-primary" onClick={saveEdit} disabled={editSaving}>
+                  {editSaving ? "Saving…" : "Save Changes"}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setEditing(false)} disabled={editSaving}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="grid-2">
+              <div className="field">
+                <label>Index Number</label>
+                <input type="text" value={student.indexNumber} readOnly />
+              </div>
+              {READONLY_FIELDS.map((f) => (
+                <div className="field" key={String(f.key)}>
+                  <label>{f.label}</label>
+                  <input type="text" value={(student[f.key] as string) || "—"} readOnly />
+                </div>
+              ))}
+              <div className="field">
+                <label>Distributor Name</label>
+                <input type="text" value={user?.name || ""} readOnly />
+              </div>
             </div>
-          </div>
+          )}
 
           <form onSubmit={handleSubmit} className={activeAssignment ? "disabled-form" : undefined}>
             <h4>Device Details (recorded at distribution)</h4>

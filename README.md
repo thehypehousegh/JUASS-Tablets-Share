@@ -275,6 +275,14 @@ lets you match each of the real file's columns to a field, or leave it as an
   accounts) plus your password; 5 failed attempts blocks the account until
   an Admin unlocks it from Manage Users.
 - Faulty/missing reports need Admin approval before they count anywhere.
+- Only Super Admin can edit a student's record (from Student Records, or
+  inline while assigning a device) or bulk-delete students by year group
+  and/or class. Editing works regardless of whether the student already
+  has a device assigned, replaced, or returned. Bulk delete always requires
+  picking a year group or class (there's no "delete everyone" button),
+  shows exact counts of what will be removed — including cascaded device
+  assignments and issue reports — before anything happens, and requires
+  typing "DELETE" to confirm.
 - `npm audit` is clean for both `server` and `client` as of this build. One
   moderate, non-exploitable-in-this-app transitive advisory remains from
   `exceljs`'s `uuid` dependency (a buffer-bounds issue only reachable if a

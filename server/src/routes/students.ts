@@ -84,6 +84,67 @@ router.get(
   })
 );
 
+function bulkDeleteWhere(year?: string, className?: string) {
+  if (!year && !className) return null;
+  return { admissionYear: year || undefined, className: className || undefined };
+}
+
+// Preview and bulk-delete are scoped to a year group and/or class on
+// purpose — there's no "delete everything" button, to make an accidental
+// wipe of the whole roster harder to trigger.
+router.get(
+  "/bulk-delete/preview",
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const year = req.query.year ? String(req.query.year) : undefined;
+    const className = req.query.className ? String(req.query.className) : undefined;
+    const where = bulkDeleteWhere(year, className);
+    if (!where) return res.status(400).json({ error: "Select a year group or class first" });
+
+    const students = await prisma.student.findMany({ where, select: { id: true } });
+    const studentIds = students.map((s) => s.id);
+    const [assignmentCount, issueReportCount] = await Promise.all([
+      prisma.deviceAssignment.count({ where: { studentId: { in: studentIds } } }),
+      prisma.deviceIssueReport.count({ where: { assignment: { studentId: { in: studentIds } } } }),
+    ]);
+    res.json({ studentCount: studentIds.length, assignmentCount, issueReportCount });
+  })
+);
+
+const bulkDeleteSchema = z.object({
+  year: z.string().optional(),
+  className: z.string().optional(),
+});
+
+router.post(
+  "/bulk-delete",
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const parsed = bulkDeleteSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid request" });
+    const where = bulkDeleteWhere(parsed.data.year, parsed.data.className);
+    if (!where) return res.status(400).json({ error: "Select a year group or class first" });
+
+    const students = await prisma.student.findMany({ where, select: { id: true } });
+    const studentIds = students.map((s) => s.id);
+    if (studentIds.length === 0) {
+      return res.json({ deletedStudents: 0, deletedAssignments: 0, deletedIssueReports: 0 });
+    }
+
+    const [issueReports, assignments, deletedStudents] = await prisma.$transaction([
+      prisma.deviceIssueReport.deleteMany({ where: { assignment: { studentId: { in: studentIds } } } }),
+      prisma.deviceAssignment.deleteMany({ where: { studentId: { in: studentIds } } }),
+      prisma.student.deleteMany({ where: { id: { in: studentIds } } }),
+    ]);
+
+    res.json({
+      deletedStudents: deletedStudents.count,
+      deletedAssignments: assignments.count,
+      deletedIssueReports: issueReports.count,
+    });
+  })
+);
+
 router.get(
   "/:indexNumber",
   asyncHandler(async (req, res) => {
@@ -92,6 +153,50 @@ router.get(
       include: { assignments: { orderBy: { createdAt: "desc" }, include: { distributor: { select: { name: true } } } } },
     });
     if (!student) return res.status(404).json({ error: "No student found with this index number" });
+    res.json(student);
+  })
+);
+
+const studentUpdateSchema = z.object({
+  indexNumber: z.string().min(1).optional(),
+  fullName: z.string().min(1).optional(),
+  gender: z.string().nullable().optional(),
+  dateOfBirth: z.string().nullable().optional(),
+  className: z.string().nullable().optional(),
+  programme: z.string().nullable().optional(),
+  house: z.string().nullable().optional(),
+  guardianName: z.string().nullable().optional(),
+  guardianContact: z.string().nullable().optional(),
+  admissionYear: z.string().nullable().optional(),
+});
+
+// Editing a student's record is independent of any assignment they have —
+// works the same whether they have no device yet, an active one, a
+// replaced one, or a returned one. Lets an Admin correct anomalies (a
+// misspelled name, wrong class, mistyped index number, etc.) at any time,
+// including right in the middle of the Assign Device flow.
+router.patch(
+  "/:id",
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const parsed = studentUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
+
+    const { dateOfBirth, ...rest } = parsed.data;
+    const data: Prisma.StudentUpdateInput = { ...rest };
+    if (dateOfBirth !== undefined) {
+      data.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
+    }
+
+    const student = await prisma.student
+      .update({ where: { id: req.params.id }, data })
+      .catch((e: { code?: string }) => {
+        if (e?.code === "P2002") return "DUPLICATE" as const;
+        if (e?.code === "P2025") return "NOT_FOUND" as const;
+        throw e;
+      });
+    if (student === "NOT_FOUND") return res.status(404).json({ error: "Student not found" });
+    if (student === "DUPLICATE") return res.status(409).json({ error: "Another student already has this index number" });
     res.json(student);
   })
 );
