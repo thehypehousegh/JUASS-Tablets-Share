@@ -14,7 +14,11 @@ COPY client ./
 RUN npm run build
 
 # ---- server (compile TypeScript) ----
+# openssl is required by Prisma's engine binaries even just to run
+# `prisma generate` correctly on Alpine (musl) — without it, Prisma can't
+# detect which engine variant to use and silently picks the wrong one.
 FROM node:20-alpine AS server-build
+RUN apk add --no-cache openssl
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json* ./
 COPY server/prisma ./prisma
@@ -25,6 +29,7 @@ RUN npm run build
 
 # ---- runtime ----
 FROM node:20-alpine AS runtime
+RUN apk add --no-cache openssl
 WORKDIR /app/server
 ENV NODE_ENV=production
 
