@@ -7,6 +7,12 @@ interface FieldDef {
   required: boolean;
 }
 
+interface CustomFieldDef {
+  id: string;
+  key: string;
+  label: string;
+}
+
 interface ParsedResult {
   headers: string[];
   rowCount: number;
@@ -30,11 +36,22 @@ interface HeaderSelectionResult {
 
 type ParseResponse = ParsedResult | SheetSelectionResult | HeaderSelectionResult;
 
+// Sentinel select value meaning "use one fixed value for every row in this
+// import" rather than reading a column from the file.
+const CONSTANT_MODE = "__constant__";
+
 export default function ImportStudents() {
-  const [fields, setFields] = useState<FieldDef[]>([]);
+  const [builtinFields, setBuiltinFields] = useState<FieldDef[]>([]);
+  const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
+  const [newFieldLabel, setNewFieldLabel] = useState("");
+  const [addingField, setAddingField] = useState(false);
+  const [addFieldError, setAddFieldError] = useState<string | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
   const [parsed, setParsed] = useState<ParsedResult | null>(null);
-  const [mapping, setMapping] = useState<Record<string, string>>({});
+  // For each target field key: "" (skip), a file header, or CONSTANT_MODE.
+  const [selection, setSelection] = useState<Record<string, string>>({});
+  const [constants, setConstants] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ created: number; updated: number; errors: string[] } | null>(null);
@@ -46,9 +63,33 @@ export default function ImportStudents() {
   const [headerRow, setHeaderRow] = useState(1);
   const [dataStartRow, setDataStartRow] = useState(2);
 
+  const allFields: FieldDef[] = [...builtinFields, ...customFields.map((f) => ({ key: f.key, label: f.label, required: false }))];
+
+  function loadCustomFields() {
+    apiGet("/custom-fields")
+      .then((rows: CustomFieldDef[]) => setCustomFields(rows))
+      .catch(() => setCustomFields([]));
+  }
+
   useEffect(() => {
-    apiGet("/students/fields").then(setFields).catch(() => setFields([]));
+    apiGet("/students/fields").then(setBuiltinFields).catch(() => setBuiltinFields([]));
+    loadCustomFields();
   }, []);
+
+  async function addCustomField() {
+    if (!newFieldLabel.trim()) return;
+    setAddingField(true);
+    setAddFieldError(null);
+    try {
+      const field: CustomFieldDef = await apiSend("POST", "/custom-fields", { label: newFieldLabel.trim() });
+      setCustomFields((f) => (f.some((existing) => existing.key === field.key) ? f : [...f, field]));
+      setNewFieldLabel("");
+    } catch (err) {
+      setAddFieldError(err instanceof ApiError ? err.message : "Could not add this field");
+    } finally {
+      setAddingField(false);
+    }
+  }
 
   function applyParsed(data: ParsedResult) {
     setParsed(data);
@@ -56,11 +97,12 @@ export default function ImportStudents() {
     setHeaderPreview(null);
     // Best-effort auto-match by similar header/field names.
     const auto: Record<string, string> = {};
-    for (const f of fields) {
+    for (const f of allFields) {
       const match = data.headers.find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === f.key.toLowerCase());
       if (match) auto[f.key] = match;
     }
-    setMapping(auto);
+    setSelection(auto);
+    setConstants({});
   }
 
   async function parseFile(opts: { sheet?: string; headerRow?: number; dataStartRow?: number } = {}) {
@@ -108,7 +150,19 @@ export default function ImportStudents() {
     setError(null);
     setBusy(true);
     try {
-      const res = await apiSend("POST", "/students/import/commit", { mapping, rows: parsed.rows });
+      const mapping: Record<string, string> = {};
+      const finalConstants: Record<string, string> = {};
+      for (const f of allFields) {
+        const sel = selection[f.key];
+        if (!sel) continue;
+        if (sel === CONSTANT_MODE) {
+          const value = constants[f.key]?.trim();
+          if (value) finalConstants[f.key] = value;
+        } else {
+          mapping[f.key] = sel;
+        }
+      }
+      const res = await apiSend("POST", "/students/import/commit", { mapping, constants: finalConstants, rows: parsed.rows });
       setResult(res);
       setParsed(null);
       setFile(null);
@@ -230,32 +284,67 @@ export default function ImportStudents() {
             Match Columns ({parsed.rowCount} rows found{parsed.sheet ? ` on sheet "${parsed.sheet}"` : ""}
             {parsed.headerRow ? `, heading row ${parsed.headerRow}` : ""})
           </h3>
-          <div className="grid-2">
-            {fields.map((f) => (
-              <div className="field" key={f.key}>
-                <label>
-                  {f.label}
-                  {f.required ? " *" : ""}
-                </label>
-                <select
-                  value={mapping[f.key] || ""}
-                  onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))}
-                >
-                  <option value="">Not in file / skip</option>
-                  {parsed.headers.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-          </div>
           <p className="hint-text">
-            Any column not matched above will still be saved and shown on the student's record so no admission data is
-            lost.
+            For each field: pick the matching column from the file, type one fixed value to apply to every row (e.g. a
+            Year Group that's the same for the whole batch), or leave it as "Not in file / skip". Fields left unset stay
+            empty until a distributor or admin fills them in later, per student.
           </p>
-          <button className="btn-primary" onClick={handleCommit} disabled={busy || !mapping.indexNumber}>
+
+          <div className="grid-2">
+            {allFields.map((f) => {
+              const sel = selection[f.key] || "";
+              return (
+                <div className="field" key={f.key}>
+                  <label>
+                    {f.label}
+                    {f.required ? " *" : ""}
+                  </label>
+                  <select
+                    value={sel}
+                    onChange={(e) => setSelection((m) => ({ ...m, [f.key]: e.target.value }))}
+                  >
+                    <option value="">Not in file / skip</option>
+                    {f.key !== "indexNumber" && <option value={CONSTANT_MODE}>Same value for every row…</option>}
+                    {parsed.headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  {sel === CONSTANT_MODE && (
+                    <input
+                      type="text"
+                      placeholder={`Value to use for every row, e.g. 2026`}
+                      value={constants[f.key] || ""}
+                      onChange={(e) => setConstants((c) => ({ ...c, [f.key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="import-row">
+            <div className="field grow">
+              <label>Need a field that isn't listed above?</label>
+              <input
+                type="text"
+                placeholder="e.g. Scholarship Type"
+                value={newFieldLabel}
+                onChange={(e) => setNewFieldLabel(e.target.value)}
+              />
+            </div>
+            <button type="button" className="btn-secondary" onClick={addCustomField} disabled={addingField || !newFieldLabel.trim()}>
+              {addingField ? "Adding…" : "Add Field"}
+            </button>
+          </div>
+          {addFieldError && <p className="error-text">{addFieldError}</p>}
+
+          <p className="hint-text">
+            Any file column not matched to a field above will still be saved and shown on the student's record under
+            its original heading, so no admission data is lost.
+          </p>
+          <button className="btn-primary" onClick={handleCommit} disabled={busy || !selection.indexNumber}>
             {busy ? "Importing…" : "Import Students"}
           </button>
         </div>

@@ -269,6 +269,18 @@ lost, it just may need re-mapping once you import it (Import Students screen
 lets you match each of the real file's columns to a field, or leave it as an
 "extra" field).
 
+For anything the built-in fields don't cover, a Super Admin can define
+**Custom Fields** (Import Students screen, "Need a field that isn't listed
+above?") — a reusable named field beyond the built-in list, stored under
+`extraFields` by its own key so it shows up consistently everywhere: as a
+mappable column at import time, as an editable field on the Assignment form
+and the Student Records edit modal (for values that are per-student and
+weren't in the admission data — a distributor or admin fills them in as
+students are processed), and as a selectable, renamable column in Reports.
+Import mapping also supports setting one fixed value for every row in a
+batch instead of reading a column — useful for a field like Year Group that
+is the same for the whole import but isn't a column in the file.
+
 ## Security notes
 
 - Login is by selecting your name from a dropdown (populated from active

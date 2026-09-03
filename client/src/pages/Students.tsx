@@ -14,7 +14,14 @@ interface StudentRow {
   guardianName: string | null;
   guardianContact: string | null;
   admissionYear: string | null;
+  extraFields: Record<string, unknown> | null;
   assignments: { status: string }[];
+}
+
+interface CustomFieldDef {
+  id: string;
+  key: string;
+  label: string;
 }
 
 const EDIT_FIELDS: { key: keyof StudentRow; label: string; required?: boolean }[] = [
@@ -41,6 +48,7 @@ export default function Students() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<StudentRow | null>(null);
+  const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
 
   async function load() {
     setLoading(true);
@@ -67,6 +75,7 @@ export default function Students() {
   useEffect(() => {
     load();
     loadFilterOptions();
+    apiGet("/custom-fields").then(setCustomFields).catch(() => setCustomFields([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -166,6 +175,7 @@ export default function Students() {
       {editing && (
         <EditStudentModal
           student={editing}
+          customFields={customFields}
           onClose={() => setEditing(null)}
           onSaved={(updated) => {
             setRows((rs) => rs.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
@@ -180,16 +190,23 @@ export default function Students() {
 
 function EditStudentModal({
   student,
+  customFields,
   onClose,
   onSaved,
 }: {
   student: StudentRow;
+  customFields: CustomFieldDef[];
   onClose: () => void;
   onSaved: (updated: StudentRow) => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const v: Record<string, string> = {};
     for (const f of EDIT_FIELDS) v[String(f.key)] = (student[f.key] as string) || "";
+    return v;
+  });
+  const [customValues, setCustomValues] = useState<Record<string, string>>(() => {
+    const v: Record<string, string> = {};
+    for (const f of customFields) v[f.key] = String(student.extraFields?.[f.key] ?? "");
     return v;
   });
   const [saving, setSaving] = useState(false);
@@ -209,7 +226,12 @@ function EditStudentModal({
         const v = values[String(f.key)]?.trim() || "";
         data[String(f.key)] = v || null;
       }
-      const updated = await apiSend("PATCH", `/students/${student.id}`, data);
+      let updated = await apiSend("PATCH", `/students/${student.id}`, data);
+      if (customFields.length > 0) {
+        const customData: Record<string, string> = {};
+        for (const f of customFields) customData[f.key] = customValues[f.key]?.trim() || "";
+        updated = await apiSend("PATCH", `/students/${student.id}/custom-fields`, { values: customData });
+      }
       onSaved(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save changes");
@@ -246,6 +268,23 @@ function EditStudentModal({
             </div>
           ))}
         </div>
+        {customFields.length > 0 && (
+          <>
+            <h4>Additional Details</h4>
+            <div className="grid-2">
+              {customFields.map((f) => (
+                <div className="field" key={f.key}>
+                  <label>{f.label}</label>
+                  <input
+                    type="text"
+                    value={customValues[f.key] || ""}
+                    onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         {error && <p className="error-text">{error}</p>}
         <button type="submit" className="btn-primary" disabled={saving}>
           {saving ? "Saving…" : "Save Changes"}

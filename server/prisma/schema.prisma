@@ -145,3 +145,15 @@ model Setting {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+// A user-defined field beyond the built-in Student columns — e.g. "Scholarship
+// Type" or a Year Group that only applies to one import batch. `key` is the
+// slug used inside Student.extraFields (and in report/import field pickers);
+// `label` is what's shown on screen and as the export column header by default.
+model CustomField {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  label     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -303,7 +303,11 @@ router.post(
 );
 
 const commitSchema = z.object({
-  mapping: z.record(z.string(), z.string()), // studentField -> source header
+  mapping: z.record(z.string(), z.string()), // targetField -> source header
+  // targetField -> a single value applied to every row, for fields that
+  // aren't in the file at all but are the same for the whole batch (e.g.
+  // Year Group = 2026 for every student in this import).
+  constants: z.record(z.string(), z.string()).optional(),
   rows: z.array(z.record(z.string(), z.unknown())),
 });
 
@@ -314,10 +318,16 @@ router.post(
     const parsed = commitSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid import payload" });
     const { mapping, rows } = parsed.data;
+    const constants = parsed.data.constants || {};
     if (!mapping.indexNumber) return res.status(400).json({ error: "Index Number must be mapped" });
 
     const knownKeys = new Set(STUDENT_FIELDS.map((f) => f.key));
+    const customFields = await prisma.customField.findMany();
+    const customKeys = new Set(customFields.map((f) => f.key));
     const mappedHeaders = new Set(Object.values(mapping));
+    // Every target field this import batch touches, whether via a mapped
+    // column or a fixed value for every row.
+    const targetFields = new Set([...Object.keys(mapping), ...Object.keys(constants)]);
 
     let created = 0;
     let updated = 0;
@@ -332,18 +342,27 @@ router.post(
       const data: Record<string, unknown> = {};
       const extraFields: Record<string, unknown> = {};
 
-      for (const [header, value] of Object.entries(row)) {
-        const field = Object.entries(mapping).find(([, h]) => h === header)?.[0];
-        if (field && knownKeys.has(field as (typeof STUDENT_FIELDS)[number]["key"])) {
-          if (field === "dateOfBirth" && value) {
-            const d = new Date(value as string);
+      for (const field of targetFields) {
+        if (field === "indexNumber") continue;
+        const header = mapping[field];
+        const rawValue = header !== undefined ? row[header] : constants[field];
+        if (knownKeys.has(field as (typeof STUDENT_FIELDS)[number]["key"])) {
+          if (field === "dateOfBirth" && rawValue) {
+            const d = new Date(rawValue as string);
             data[field] = isNaN(d.getTime()) ? null : d;
-          } else if (field !== "indexNumber") {
-            data[field] = value === "" ? null : String(value);
+          } else {
+            data[field] = rawValue === "" || rawValue === undefined ? null : String(rawValue);
           }
-        } else if (!mappedHeaders.has(header)) {
-          extraFields[header] = value;
+        } else if (customKeys.has(field)) {
+          extraFields[field] = rawValue === undefined ? "" : rawValue;
         }
+      }
+
+      // Safety net: any file column not claimed by any target field's
+      // mapping is still preserved verbatim under its original heading, so
+      // an admin who hasn't defined a custom field for it yet doesn't lose it.
+      for (const [header, value] of Object.entries(row)) {
+        if (!mappedHeaders.has(header)) extraFields[header] = value;
       }
 
       const result = await prisma.student.upsert({
@@ -361,6 +380,39 @@ router.post(
     }
 
     res.json({ created, updated, errors });
+  })
+);
+
+const customFieldValuesSchema = z.object({
+  values: z.record(z.string(), z.string().nullable()),
+});
+
+// Lets a Distributor (not just an Admin) fill in custom-field values for a
+// student at assignment time — e.g. a field that isn't in the admission
+// data and has to be captured per-student. Deliberately narrower than the
+// full-record PATCH above: it can only touch extraFields, never core
+// identity fields like index number or name.
+router.patch(
+  "/:id/custom-fields",
+  requireRole("SUPER_ADMIN", "DISTRIBUTOR"),
+  asyncHandler(async (req, res) => {
+    const parsed = customFieldValuesSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+    const student = await prisma.student.findUnique({ where: { id: req.params.id } });
+    if (!student) return res.status(404).json({ error: "Student not found" });
+
+    const existing = (student.extraFields as Record<string, unknown>) || {};
+    const merged = { ...existing };
+    for (const [key, value] of Object.entries(parsed.data.values)) {
+      merged[key] = value === null ? "" : value;
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: student.id },
+      data: { extraFields: merged as Prisma.InputJsonValue },
+    });
+    res.json(updated);
   })
 );
 

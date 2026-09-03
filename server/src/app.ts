@@ -14,6 +14,7 @@ import dashboardRoutes from "./routes/dashboard";
 import settingsRoutes from "./routes/settings";
 import backupRoutes from "./routes/backup";
 import reportsRoutes from "./routes/reports";
+import customFieldsRoutes from "./routes/customFields";
 
 export function createApp() {
   const app = express();
@@ -46,6 +47,7 @@ export function createApp() {
   app.use("/api/settings", settingsRoutes);
   app.use("/api/backup", backupRoutes);
   app.use("/api/reports", reportsRoutes);
+  app.use("/api/custom-fields", customFieldsRoutes);
 
   // Serve the built React app in production (single deployable service).
   const clientDist = path.resolve(__dirname, "../../client/dist");

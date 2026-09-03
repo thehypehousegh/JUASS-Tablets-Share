@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiGet, apiSend, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import ScanInput from "../components/ScanInput";
@@ -19,6 +19,12 @@ interface StudentRecord {
   admissionYear: string | null;
   extraFields: Record<string, unknown> | null;
   assignments: { status: string; imei: string; serialNumber: string; dateAssigned: string; distributor: { name: string } }[];
+}
+
+interface CustomFieldDef {
+  id: string;
+  key: string;
+  label: string;
 }
 
 const READONLY_FIELDS: { key: keyof StudentRecord; label: string }[] = [
@@ -45,6 +51,16 @@ export default function AssignmentForm() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [customSaved, setCustomSaved] = useState(false);
+
+  useEffect(() => {
+    apiGet("/custom-fields").then(setCustomFields).catch(() => setCustomFields([]));
+  }, []);
+
   const [imei, setImei] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [embossmentNumber, setEmbossmentNumber] = useState("");
@@ -61,12 +77,35 @@ export default function AssignmentForm() {
     if (!indexNumber.trim()) return;
     setSearching(true);
     try {
-      const data = await apiGet(`/students/${encodeURIComponent(indexNumber.trim())}`);
+      const data: StudentRecord = await apiGet(`/students/${encodeURIComponent(indexNumber.trim())}`);
       setStudent(data);
+      const values: Record<string, string> = {};
+      for (const f of customFields) values[f.key] = String(data.extraFields?.[f.key] ?? "");
+      setCustomValues(values);
+      setCustomSaved(false);
+      setCustomError(null);
     } catch (err) {
       setSearchError(err instanceof ApiError ? err.message : "Search failed");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function saveCustomFields() {
+    if (!student) return;
+    setCustomSaving(true);
+    setCustomError(null);
+    setCustomSaved(false);
+    try {
+      const values: Record<string, string> = {};
+      for (const f of customFields) values[f.key] = customValues[f.key]?.trim() || "";
+      const updated = await apiSend("PATCH", `/students/${student.id}/custom-fields`, { values });
+      setStudent({ ...student, ...updated });
+      setCustomSaved(true);
+    } catch (err) {
+      setCustomError(err instanceof ApiError ? err.message : "Could not save these details");
+    } finally {
+      setCustomSaving(false);
     }
   }
 
@@ -248,6 +287,35 @@ export default function AssignmentForm() {
                 <label>Distributor Name</label>
                 <input type="text" value={user?.name || ""} readOnly />
               </div>
+            </div>
+          )}
+
+          {customFields.length > 0 && (
+            <div className="section-heading">
+              <h4>Additional Details</h4>
+              <p className="hint-text">
+                These fields aren't part of the admission data import — fill in what's missing for this student.
+              </p>
+              <div className="grid-2">
+                {customFields.map((f) => (
+                  <div className="field" key={f.key}>
+                    <label>{f.label}</label>
+                    <input
+                      type="text"
+                      value={customValues[f.key] || ""}
+                      onChange={(e) => {
+                        setCustomValues((v) => ({ ...v, [f.key]: e.target.value }));
+                        setCustomSaved(false);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {customError && <p className="error-text">{customError}</p>}
+              {customSaved && <p className="success-text">Saved.</p>}
+              <button type="button" className="btn-secondary" onClick={saveCustomFields} disabled={customSaving}>
+                {customSaving ? "Saving…" : "Save Additional Details"}
+              </button>
             </div>
           )}
 

@@ -22,6 +22,7 @@ interface DataResponse {
   title: string;
   generatedAt: string;
   fields: string[];
+  columnLabels: Record<string, string>;
   rowCount: number;
   rows: Record<string, string>[];
 }
@@ -36,6 +37,7 @@ export default function Reports() {
   const [classOptions, setClassOptions] = useState<string[]>([]);
   const [yearOptions, setYearOptions] = useState<string[]>([]);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [columnLabels, setColumnLabels] = useState<Record<string, string>>({});
   const [data, setData] = useState<DataResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -55,6 +57,7 @@ export default function Reports() {
   function changeType(nextType: string) {
     setType(nextType);
     setData(null);
+    setColumnLabels({});
     if (meta) {
       setSelectedFields(meta.defaultFields[nextType] || []);
       setTitle(meta.defaultTitles[nextType] || "");
@@ -69,6 +72,13 @@ export default function Reports() {
     if (year) params.set("year", year);
     if (q) params.set("q", q);
     if (fields.length > 0) params.set("fields", fields.join(","));
+    const overrides: Record<string, string> = {};
+    for (const f of fields) {
+      const custom = columnLabels[f]?.trim();
+      const catalogLabel = meta?.fields.find((mf) => mf.key === f)?.label;
+      if (custom && custom !== catalogLabel) overrides[f] = custom;
+    }
+    if (Object.keys(overrides).length > 0) params.set("labels", JSON.stringify(overrides));
     return params;
   }
 
@@ -210,6 +220,32 @@ export default function Reports() {
         </div>
       </div>
 
+      {selectedFields.length > 0 && (
+        <div className="card">
+          <h3>5. Column Headers (optional)</h3>
+          <div className="filter-row filter-row-spaced">
+            <p className="hint-text">Rename any column's exported/displayed header — leave as-is to use its default name.</p>
+            <button type="button" className="btn-link" onClick={() => setColumnLabels({})}>
+              Reset all headers
+            </button>
+          </div>
+          <div className="grid-2">
+            {meta.fields
+              .filter((f) => selectedFields.includes(f.key))
+              .map((f) => (
+                <div className="field" key={f.key}>
+                  <label>{f.label}</label>
+                  <input
+                    type="text"
+                    value={columnLabels[f.key] ?? f.label}
+                    onChange={(e) => setColumnLabels((m) => ({ ...m, [f.key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {error && <p className="error-text">{error}</p>}
 
       <div className="filter-row filter-row-spaced">
@@ -232,7 +268,7 @@ export default function Reports() {
               <thead>
                 <tr>
                   {data.fields.map((f) => (
-                    <th key={f}>{labelByKey.get(f) || f}</th>
+                    <th key={f}>{data.columnLabels[f] || labelByKey.get(f) || f}</th>
                   ))}
                 </tr>
               </thead>

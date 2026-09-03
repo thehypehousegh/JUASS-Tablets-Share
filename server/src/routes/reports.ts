@@ -23,9 +23,16 @@ interface FieldDef {
   label: string;
 }
 
-// Superset of columns any report row could carry. A row only fills in the
-// fields relevant to its report type — the rest stay blank — so the same
-// field catalog and row shape works for every report without special-casing.
+// Custom fields are stored per-student under Student.extraFields, keyed by
+// their own slug — prefixed here so they can never collide with a built-in
+// column key.
+const CUSTOM_FIELD_PREFIX = "custom_";
+
+// Superset of built-in columns any report row could carry. A row only fills
+// in the fields relevant to its report type — the rest stay blank — so the
+// same field catalog and row shape works for every report without
+// special-casing. Custom fields (admin-defined, see CustomField model) are
+// appended to this at request time since they can change at any point.
 const ALL_FIELDS: FieldDef[] = [
   { key: "indexNumber", label: "Index Number" },
   { key: "fullName", label: "Full Name" },
@@ -54,8 +61,6 @@ const ALL_FIELDS: FieldDef[] = [
   { key: "reviewNote", label: "Review Note" },
 ];
 
-const FIELD_KEYS = new Set(ALL_FIELDS.map((f) => f.key));
-
 // Auto-assigned title for each generic report — shown on row 1 of the export
 // and above the on-screen preview. The admin can type over it for a custom
 // title when they've built a custom column selection.
@@ -69,7 +74,9 @@ const DEFAULT_TITLES: Record<ReportType, string> = {
 };
 
 // Sensible starting selection per report type — the admin can still add or
-// remove any column before viewing/exporting.
+// remove any column before viewing/exporting. Custom fields are never in
+// the default selection (there's no way to guess which ones matter for a
+// given report) — the admin adds them explicitly.
 const DEFAULT_FIELDS: Record<ReportType, string[]> = {
   all_students: ["indexNumber", "fullName", "gender", "className", "admissionYear", "assignmentStatus"],
   assigned: [
@@ -89,14 +96,23 @@ const DEFAULT_FIELDS: Record<ReportType, string[]> = {
   missing: ["indexNumber", "fullName", "className", "imei", "serialNumber", "issueDescription", "issueStatus", "reportedByName", "reviewedByName"],
 };
 
-router.get("/types", (_req, res) => {
-  res.json({
-    types: REPORT_TYPES,
-    fields: ALL_FIELDS,
-    defaultFields: DEFAULT_FIELDS,
-    defaultTitles: DEFAULT_TITLES,
-  });
-});
+async function loadFieldCatalog(): Promise<FieldDef[]> {
+  const customFields = await prisma.customField.findMany({ orderBy: { createdAt: "asc" } });
+  return [...ALL_FIELDS, ...customFields.map((f) => ({ key: `${CUSTOM_FIELD_PREFIX}${f.key}`, label: f.label }))];
+}
+
+router.get(
+  "/types",
+  asyncHandler(async (_req, res) => {
+    const fields = await loadFieldCatalog();
+    res.json({
+      types: REPORT_TYPES,
+      fields,
+      defaultFields: DEFAULT_FIELDS,
+      defaultTitles: DEFAULT_TITLES,
+    });
+  })
+);
 
 function dateStr(d: Date | null | undefined) {
   return d ? d.toISOString().slice(0, 10) : "";
@@ -104,9 +120,9 @@ function dateStr(d: Date | null | undefined) {
 
 type Row = Record<string, string>;
 
-function blankRow(): Row {
+function blankRow(catalog: FieldDef[]): Row {
   const row: Row = {};
-  for (const f of ALL_FIELDS) row[f.key] = "";
+  for (const f of catalog) row[f.key] = "";
   return row;
 }
 
@@ -121,8 +137,10 @@ function studentFields(s: {
   guardianName: string | null;
   guardianContact: string | null;
   admissionYear: string | null;
+  extraFields: unknown;
 }): Row {
-  return {
+  const extra = (s.extraFields as Record<string, unknown>) || {};
+  const row: Row = {
     indexNumber: s.indexNumber,
     fullName: s.fullName,
     gender: s.gender ?? "",
@@ -134,9 +152,14 @@ function studentFields(s: {
     guardianContact: s.guardianContact ?? "",
     admissionYear: s.admissionYear ?? "",
   };
+  for (const [key, value] of Object.entries(extra)) {
+    row[`${CUSTOM_FIELD_PREFIX}${key}`] = value === null || value === undefined ? "" : String(value);
+  }
+  return row;
 }
 
 async function fetchRows(
+  catalog: FieldDef[],
   type: ReportType,
   filters: { className?: string; year?: string; q?: string }
 ): Promise<Row[]> {
@@ -158,7 +181,7 @@ async function fetchRows(
       take: 10000,
     });
     return students.map((s) => {
-      const row = { ...blankRow(), ...studentFields(s) };
+      const row = { ...blankRow(catalog), ...studentFields(s) };
       if (type === "all_students") {
         const active = (s as unknown as { assignments?: { status: string }[] }).assignments?.[0];
         row.assignmentStatus = active ? "With Student" : "Not Assigned";
@@ -179,7 +202,7 @@ async function fetchRows(
       take: 10000,
     });
     return assignments.map((a) => ({
-      ...blankRow(),
+      ...blankRow(catalog),
       ...studentFields(a.student),
       assignmentStatus: a.status === "WITH_STUDENT" ? "With Student" : "Returned",
       distributorName: a.distributor.name,
@@ -212,7 +235,7 @@ async function fetchRows(
     .map((i) => {
       const a = i.assignment!;
       return {
-        ...blankRow(),
+        ...blankRow(catalog),
         ...studentFields(a.student),
         assignmentStatus: a.status === "WITH_STUDENT" ? "With Student" : a.status === "RETURNED" ? "Returned" : "Replaced",
         distributorName: a.distributor.name,
@@ -231,29 +254,49 @@ async function fetchRows(
     });
 }
 
-function parseParams(req: import("express").Request) {
+function parseLabelOverrides(req: import("express").Request): Record<string, string> {
+  if (!req.query.labels) return {};
+  try {
+    const parsed = JSON.parse(String(req.query.labels));
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function parseParams(req: import("express").Request, catalog: FieldDef[]) {
   const type = String(req.query.type || "all_students") as ReportType;
   if (!REPORT_TYPES.some((t) => t.key === type)) return null;
+  const fieldKeys = new Set(catalog.map((f) => f.key));
   const className = req.query.className ? String(req.query.className) : undefined;
   const year = req.query.year ? String(req.query.year) : undefined;
   const q = req.query.q ? String(req.query.q) : undefined;
   const rawFields = req.query.fields ? String(req.query.fields).split(",").map((f) => f.trim()) : DEFAULT_FIELDS[type];
-  const fields = rawFields.filter((f) => FIELD_KEYS.has(f));
+  const fields = rawFields.filter((f) => fieldKeys.has(f));
   const rawTitle = req.query.title ? String(req.query.title).trim() : "";
   const title = rawTitle || DEFAULT_TITLES[type];
-  return { type, className, year, q, fields: fields.length > 0 ? fields : DEFAULT_FIELDS[type], title };
+  const labelOverrides = parseLabelOverrides(req);
+  return { type, className, year, q, fields: fields.length > 0 ? fields : DEFAULT_FIELDS[type], title, labelOverrides };
 }
 
 router.get(
   "/data",
   asyncHandler(async (req, res) => {
-    const params = parseParams(req);
+    const catalog = await loadFieldCatalog();
+    const params = parseParams(req, catalog);
     if (!params) return res.status(400).json({ error: "Unknown report type" });
-    const rows = await fetchRows(params.type, params);
+    const labelByKey = new Map(catalog.map((f) => [f.key, f.label]));
+    const rows = await fetchRows(catalog, params.type, params);
     res.json({
       title: params.title,
       generatedAt: dateStr(new Date()),
       fields: params.fields,
+      columnLabels: Object.fromEntries(params.fields.map((f) => [f, params.labelOverrides[f] || labelByKey.get(f) || f])),
       rowCount: rows.length,
       rows: rows.map((r) => {
         const out: Row = {};
@@ -267,10 +310,11 @@ router.get(
 router.get(
   "/export.xlsx",
   asyncHandler(async (req, res) => {
-    const params = parseParams(req);
+    const catalog = await loadFieldCatalog();
+    const params = parseParams(req, catalog);
     if (!params) return res.status(400).json({ error: "Unknown report type" });
-    const rows = await fetchRows(params.type, params);
-    const labelByKey = new Map(ALL_FIELDS.map((f) => [f.key, f.label]));
+    const rows = await fetchRows(catalog, params.type, params);
+    const labelByKey = new Map(catalog.map((f) => [f.key, f.label]));
 
     const workbook = new ExcelJS.Workbook();
     const typeLabel = REPORT_TYPES.find((t) => t.key === params.type)?.label || "Report";
@@ -291,7 +335,7 @@ router.get(
     const headerRow = sheet.getRow(headerRowNum);
     params.fields.forEach((key, idx) => {
       const cell = headerRow.getCell(idx + 1);
-      cell.value = labelByKey.get(key) || key;
+      cell.value = params.labelOverrides[key] || labelByKey.get(key) || key;
     });
     headerRow.font = { bold: true };
     params.fields.forEach((_key, idx) => {
