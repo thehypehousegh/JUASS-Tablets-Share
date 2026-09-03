@@ -62,6 +62,12 @@ export default function ImportStudents() {
   const [headerPreview, setHeaderPreview] = useState<HeaderSelectionResult | null>(null);
   const [headerRow, setHeaderRow] = useState(1);
   const [dataStartRow, setDataStartRow] = useState(2);
+  const [noHeaderRow, setNoHeaderRow] = useState(false);
+
+  // Column names as detected (real header text, or "Column N" placeholders
+  // when the file has no header row) — editable before matching.
+  const [columnNames, setColumnNames] = useState<string[]>([]);
+  const [namingConfirmed, setNamingConfirmed] = useState(false);
 
   const allFields: FieldDef[] = [...builtinFields, ...customFields.map((f) => ({ key: f.key, label: f.label, required: false }))];
 
@@ -91,21 +97,51 @@ export default function ImportStudents() {
     }
   }
 
-  function applyParsed(data: ParsedResult) {
-    setParsed(data);
-    setSheetOptions(null);
-    setHeaderPreview(null);
+  function autoMatch(headers: string[]) {
     // Best-effort auto-match by similar header/field names.
     const auto: Record<string, string> = {};
     for (const f of allFields) {
-      const match = data.headers.find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === f.key.toLowerCase());
+      const match = headers.find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === f.key.toLowerCase());
       if (match) auto[f.key] = match;
     }
-    setSelection(auto);
+    return auto;
+  }
+
+  function applyParsed(data: ParsedResult) {
+    setParsed(data);
+    setColumnNames(data.headers.slice());
+    setNamingConfirmed(false);
+    setSheetOptions(null);
+    setHeaderPreview(null);
+    setSelection({});
     setConstants({});
   }
 
-  async function parseFile(opts: { sheet?: string; headerRow?: number; dataStartRow?: number } = {}) {
+  function confirmColumnNames() {
+    if (!parsed) return;
+    // Trim, default back to the detected name if left blank, and dedupe so
+    // two columns never end up sharing the same key.
+    const seen = new Map<string, number>();
+    const finalHeaders = columnNames.map((name, i) => {
+      const base = name.trim() || parsed.headers[i];
+      const count = (seen.get(base) || 0) + 1;
+      seen.set(base, count);
+      return count > 1 ? `${base} (${count})` : base;
+    });
+    const remappedRows = parsed.rows.map((row) => {
+      const newRow: Record<string, unknown> = {};
+      parsed.headers.forEach((oldHeader, i) => {
+        newRow[finalHeaders[i]] = row[oldHeader];
+      });
+      return newRow;
+    });
+    setParsed({ ...parsed, headers: finalHeaders, rows: remappedRows });
+    setSelection(autoMatch(finalHeaders));
+    setConstants({});
+    setNamingConfirmed(true);
+  }
+
+  async function parseFile(opts: { sheet?: string; headerRow?: number; dataStartRow?: number; noHeaderRow?: boolean } = {}) {
     if (!file) return;
     setError(null);
     setResult(null);
@@ -114,7 +150,11 @@ export default function ImportStudents() {
       const formData = new FormData();
       formData.append("file", file);
       if (opts.sheet) formData.append("sheet", opts.sheet);
-      if (opts.headerRow) formData.append("headerRow", String(opts.headerRow));
+      if (opts.noHeaderRow) {
+        formData.append("noHeaderRow", "true");
+      } else if (opts.headerRow) {
+        formData.append("headerRow", String(opts.headerRow));
+      }
       if (opts.dataStartRow) formData.append("dataStartRow", String(opts.dataStartRow));
       const data: ParseResponse = await apiUpload("POST", "/students/import/parse", formData);
       if ("needsSheetSelection" in data) {
@@ -126,6 +166,7 @@ export default function ImportStudents() {
         setHeaderPreview(data);
         setHeaderRow(1);
         setDataStartRow(2);
+        setNoHeaderRow(false);
         setSheetOptions(null);
         setParsed(null);
       } else {
@@ -213,24 +254,38 @@ export default function ImportStudents() {
         <div className="card">
           <h3>Which row has the column headings?</h3>
           <p className="hint-text">
-            Not every file has its headings on row 1 — some have a title or note above the real table. Look at the rows
-            below and tell us which row has the column names, and which row the actual student data starts on.
+            Not every file has its headings on row 1 — some have a title or note above the real table, and some raw
+            exports have no column headings at all. Look at the rows below and tell us which row has the column
+            names (or that there isn't one), and which row the actual student data starts on.
           </p>
+          <label className="checkbox-item">
+            <input
+              type="checkbox"
+              checked={noHeaderRow}
+              onChange={(e) => {
+                setNoHeaderRow(e.target.checked);
+                if (e.target.checked) setDataStartRow(1);
+              }}
+            />
+            This file has no column headings — every row is data
+          </label>
           <div className="grid-2">
-            <div className="field">
-              <label>Heading row</label>
-              <input
-                type="number"
-                min={1}
-                max={headerPreview.rowCount}
-                value={headerRow}
-                onChange={(e) => {
-                  const v = Number(e.target.value) || 1;
-                  setHeaderRow(v);
-                  setDataStartRow(v + 1);
-                }}
-              />
-            </div>
+            {!noHeaderRow && (
+              <div className="field">
+                <label>Heading row</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={headerPreview.rowCount}
+                  value={headerRow}
+                  onChange={(e) => {
+                    const v = Number(e.target.value) || 1;
+                    setHeaderRow(v);
+                    setDataStartRow(v + 1);
+                  }}
+                />
+              </div>
+            )}
             <div className="field">
               <label>Data starts at row</label>
               <input
@@ -247,7 +302,7 @@ export default function ImportStudents() {
               <tbody>
                 {headerPreview.preview.map((row, i) => {
                   const rowNum = i + 1;
-                  const isHeader = rowNum === headerRow;
+                  const isHeader = !noHeaderRow && rowNum === headerRow;
                   const isDataStart = rowNum === dataStartRow;
                   return (
                     <tr
@@ -270,7 +325,7 @@ export default function ImportStudents() {
           </div>
           <button
             className="btn-primary"
-            onClick={() => parseFile({ sheet: selectedSheet, headerRow, dataStartRow })}
+            onClick={() => parseFile({ sheet: selectedSheet, headerRow, dataStartRow, noHeaderRow })}
             disabled={busy}
           >
             {busy ? "Reading…" : "Use These Rows"}
@@ -278,7 +333,40 @@ export default function ImportStudents() {
         </div>
       )}
 
-      {parsed && (
+      {parsed && !namingConfirmed && (
+        <div className="card">
+          <h3>Name Your Columns</h3>
+          <p className="hint-text">
+            {parsed.headerRow
+              ? "These are the column names found in the file — rename any of them if you'd like something clearer, or leave them as-is."
+              : "This file has no column headings, so generic names were assigned below — give each column a real name (or leave the generic one) before matching."}
+          </p>
+          <div className="grid-2">
+            {columnNames.map((name, i) => (
+              <div className="field" key={i}>
+                <label>Column {i + 1}</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) =>
+                    setColumnNames((names) => names.map((n, ni) => (ni === i ? e.target.value : n)))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <div className="filter-row filter-row-spaced">
+            <button type="button" className="btn-link" onClick={() => setColumnNames(parsed.headers.slice())}>
+              Reset to detected names
+            </button>
+          </div>
+          <button className="btn-primary" onClick={confirmColumnNames}>
+            Continue to Column Matching
+          </button>
+        </div>
+      )}
+
+      {parsed && namingConfirmed && (
         <div className="card">
           <h3>
             Match Columns ({parsed.rowCount} rows found{parsed.sheet ? ` on sheet "${parsed.sheet}"` : ""}
@@ -342,7 +430,7 @@ export default function ImportStudents() {
 
           <p className="hint-text">
             Any file column not matched to a field above will still be saved and shown on the student's record under
-            its original heading, so no admission data is lost.
+            its column name (as set on the previous step), so no admission data is lost.
           </p>
           <button className="btn-primary" onClick={handleCommit} disabled={busy || !selection.indexNumber}>
             {busy ? "Importing…" : "Import Students"}

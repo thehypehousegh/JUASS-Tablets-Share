@@ -264,8 +264,9 @@ router.post(
 
     if (grid.length === 0) return res.status(400).json({ error: "The file appears to be empty" });
 
+    const noHeaderRow = String(req.body.noHeaderRow) === "true";
     const headerRow = req.body.headerRow ? parseInt(String(req.body.headerRow), 10) : undefined;
-    if (!headerRow) {
+    if (!headerRow && !noHeaderRow) {
       return res.json({
         needsHeaderSelection: true,
         sheet: sheetName,
@@ -273,14 +274,28 @@ router.post(
         preview: grid.slice(0, 20),
       });
     }
-    if (headerRow < 1 || headerRow > grid.length) {
+    if (headerRow && (headerRow < 1 || headerRow > grid.length)) {
       return res.status(400).json({ error: `Row ${headerRow} doesn't exist in this sheet` });
     }
 
-    const dataStartRow = req.body.dataStartRow ? parseInt(String(req.body.dataStartRow), 10) : headerRow + 1;
-    const headers = grid[headerRow - 1].map((h) => h.trim());
-    if (headers.every((h) => !h)) {
-      return res.status(400).json({ error: `Row ${headerRow} doesn't look like a header row — every cell is blank` });
+    // Some raw exports have no header row at all — every row is data. In
+    // that case there's nothing to pick as headings, so generic column
+    // names ("Column 1", "Column 2", ...) stand in; the caller can rename
+    // any of them before matching, same as it can rename a real header.
+    const dataStartRow = req.body.dataStartRow
+      ? parseInt(String(req.body.dataStartRow), 10)
+      : noHeaderRow
+        ? 1
+        : (headerRow as number) + 1;
+    let headers: string[];
+    if (noHeaderRow) {
+      const colCount = grid.reduce((max, row) => Math.max(max, row.length), 0);
+      headers = Array.from({ length: colCount }, (_, i) => `Column ${i + 1}`);
+    } else {
+      headers = grid[(headerRow as number) - 1].map((h) => h.trim());
+      if (headers.every((h) => !h)) {
+        return res.status(400).json({ error: `Row ${headerRow} doesn't look like a header row — every cell is blank` });
+      }
     }
 
     const rows: Record<string, unknown>[] = [];
