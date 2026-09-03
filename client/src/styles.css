@@ -467,6 +467,23 @@ th {
   padding-left: 20px;
 }
 
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 16px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.checkbox-item input {
+  width: auto;
+}
+
 .import-row {
   display: flex;
   gap: 12px;

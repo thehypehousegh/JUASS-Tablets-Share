@@ -13,6 +13,7 @@ import chatRoutes from "./routes/chat";
 import dashboardRoutes from "./routes/dashboard";
 import settingsRoutes from "./routes/settings";
 import backupRoutes from "./routes/backup";
+import reportsRoutes from "./routes/reports";
 
 export function createApp() {
   const app = express();
@@ -44,6 +45,7 @@ export function createApp() {
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/settings", settingsRoutes);
   app.use("/api/backup", backupRoutes);
+  app.use("/api/reports", reportsRoutes);
 
   // Serve the built React app in production (single deployable service).
   const clientDist = path.resolve(__dirname, "../../client/dist");

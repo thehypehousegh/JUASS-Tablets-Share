@@ -72,6 +72,11 @@ export default function Layout() {
               Dashboard
             </NavLink>
           )}
+          {isSupervisor && (
+            <NavLink to="/reports" className={({ isActive }) => (isActive ? "active" : "")}>
+              Reports
+            </NavLink>
+          )}
           {isAdmin && (
             <NavLink to="/approvals" className={({ isActive }) => (isActive ? "active" : "")}>
               Approvals

@@ -12,6 +12,7 @@ import ImportStudents from "./pages/ImportStudents";
 import AdminUsers from "./pages/AdminUsers";
 import Settings from "./pages/Settings";
 import Chat from "./pages/Chat";
+import Reports from "./pages/Reports";
 
 function ProtectedRoute({ roles, children }: { roles?: Role[]; children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -105,6 +106,14 @@ export default function App() {
           }
         />
         <Route path="/students" element={<Students />} />
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute roles={["SUPER_ADMIN", "SUPERVISOR"]}>
+              <Reports />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/chat" element={<Chat />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
