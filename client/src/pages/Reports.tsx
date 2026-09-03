@@ -15,9 +15,12 @@ interface TypesResponse {
   types: ReportTypeDef[];
   fields: FieldDef[];
   defaultFields: Record<string, string[]>;
+  defaultTitles: Record<string, string>;
 }
 
 interface DataResponse {
+  title: string;
+  generatedAt: string;
   fields: string[];
   rowCount: number;
   rows: Record<string, string>[];
@@ -26,6 +29,7 @@ interface DataResponse {
 export default function Reports() {
   const [meta, setMeta] = useState<TypesResponse | null>(null);
   const [type, setType] = useState("all_students");
+  const [title, setTitle] = useState("");
   const [className, setClassName] = useState("");
   const [year, setYear] = useState("");
   const [q, setQ] = useState("");
@@ -41,6 +45,7 @@ export default function Reports() {
     apiGet("/reports/types").then((m: TypesResponse) => {
       setMeta(m);
       setSelectedFields(m.defaultFields[type] || []);
+      setTitle(m.defaultTitles[type] || "");
     });
     apiGet("/students/classes").then(setClassOptions).catch(() => null);
     apiGet("/students/years").then(setYearOptions).catch(() => null);
@@ -50,12 +55,16 @@ export default function Reports() {
   function changeType(nextType: string) {
     setType(nextType);
     setData(null);
-    if (meta) setSelectedFields(meta.defaultFields[nextType] || []);
+    if (meta) {
+      setSelectedFields(meta.defaultFields[nextType] || []);
+      setTitle(meta.defaultTitles[nextType] || "");
+    }
   }
 
   function buildParams(fields: string[]) {
     const params = new URLSearchParams();
     params.set("type", type);
+    if (title.trim()) params.set("title", title.trim());
     if (className) params.set("className", className);
     if (year) params.set("year", year);
     if (q) params.set("q", q);
@@ -127,7 +136,27 @@ export default function Reports() {
       </div>
 
       <div className="card">
-        <h3>2. Filters (optional)</h3>
+        <h3>2. Report Title</h3>
+        <p className="hint-text">
+          Shown on row 1 of the export. A title is assigned automatically for this report — type over it for a
+          custom title.
+        </p>
+        <div className="filter-row">
+          <div className="field grow">
+            <input type="text" placeholder="Report title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <button
+            type="button"
+            className="btn-link"
+            onClick={() => setTitle(meta.defaultTitles[type] || "")}
+          >
+            Reset to default title
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>3. Filters (optional)</h3>
         <div className="filter-row">
           <input
             type="text"
@@ -155,7 +184,7 @@ export default function Reports() {
       </div>
 
       <div className="card">
-        <h3>3. Columns</h3>
+        <h3>4. Columns</h3>
         <div className="filter-row filter-row-spaced">
           <button type="button" className="btn-link" onClick={() => setSelectedFields(meta.fields.map((f) => f.key))}>
             Select all
@@ -194,7 +223,10 @@ export default function Reports() {
 
       {data && (
         <div className="card">
-          <h3>{data.rowCount} rows</h3>
+          <h3>{data.title}</h3>
+          <p className="hint-text">
+            Generated on {data.generatedAt} · {data.rowCount} rows
+          </p>
           <div className="table-wrap">
             <table>
               <thead>

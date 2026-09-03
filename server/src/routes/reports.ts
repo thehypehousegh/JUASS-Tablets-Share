@@ -56,6 +56,18 @@ const ALL_FIELDS: FieldDef[] = [
 
 const FIELD_KEYS = new Set(ALL_FIELDS.map((f) => f.key));
 
+// Auto-assigned title for each generic report — shown on row 1 of the export
+// and above the on-screen preview. The admin can type over it for a custom
+// title when they've built a custom column selection.
+const DEFAULT_TITLES: Record<ReportType, string> = {
+  all_students: "List of All Students",
+  assigned: "List of Students Assigned Devices",
+  not_assigned: "List of Students Not Assigned Devices",
+  returned: "List of Returned Devices",
+  faulty: "List of Reported Faulty Devices",
+  missing: "List of Reported Missing Devices",
+};
+
 // Sensible starting selection per report type — the admin can still add or
 // remove any column before viewing/exporting.
 const DEFAULT_FIELDS: Record<ReportType, string[]> = {
@@ -82,6 +94,7 @@ router.get("/types", (_req, res) => {
     types: REPORT_TYPES,
     fields: ALL_FIELDS,
     defaultFields: DEFAULT_FIELDS,
+    defaultTitles: DEFAULT_TITLES,
   });
 });
 
@@ -226,7 +239,9 @@ function parseParams(req: import("express").Request) {
   const q = req.query.q ? String(req.query.q) : undefined;
   const rawFields = req.query.fields ? String(req.query.fields).split(",").map((f) => f.trim()) : DEFAULT_FIELDS[type];
   const fields = rawFields.filter((f) => FIELD_KEYS.has(f));
-  return { type, className, year, q, fields: fields.length > 0 ? fields : DEFAULT_FIELDS[type] };
+  const rawTitle = req.query.title ? String(req.query.title).trim() : "";
+  const title = rawTitle || DEFAULT_TITLES[type];
+  return { type, className, year, q, fields: fields.length > 0 ? fields : DEFAULT_FIELDS[type], title };
 }
 
 router.get(
@@ -236,6 +251,8 @@ router.get(
     if (!params) return res.status(400).json({ error: "Unknown report type" });
     const rows = await fetchRows(params.type, params);
     res.json({
+      title: params.title,
+      generatedAt: dateStr(new Date()),
       fields: params.fields,
       rowCount: rows.length,
       rows: rows.map((r) => {
@@ -258,12 +275,31 @@ router.get(
     const workbook = new ExcelJS.Workbook();
     const typeLabel = REPORT_TYPES.find((t) => t.key === params.type)?.label || "Report";
     const sheet = workbook.addWorksheet(typeLabel.slice(0, 31));
-    sheet.columns = params.fields.map((key) => ({ header: labelByKey.get(key) || key, key, width: 20 }));
-    sheet.getRow(1).font = { bold: true };
+    const numCols = Math.max(params.fields.length, 1);
+
+    // Row 1: report title. Row 2: generation date. Row 3 stays blank as a
+    // spacer. Row 4: column headers, data from row 5.
+    sheet.mergeCells(1, 1, 1, numCols);
+    sheet.getCell(1, 1).value = params.title;
+    sheet.getCell(1, 1).font = { bold: true, size: 14 };
+
+    sheet.mergeCells(2, 1, 2, numCols);
+    sheet.getCell(2, 1).value = `Generated on ${dateStr(new Date())}`;
+    sheet.getCell(2, 1).font = { italic: true, size: 10, color: { argb: "FF616A80" } };
+
+    const headerRowNum = 4;
+    const headerRow = sheet.getRow(headerRowNum);
+    params.fields.forEach((key, idx) => {
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = labelByKey.get(key) || key;
+    });
+    headerRow.font = { bold: true };
+    params.fields.forEach((_key, idx) => {
+      sheet.getColumn(idx + 1).width = 20;
+    });
+
     for (const row of rows) {
-      const record: Row = {};
-      for (const f of params.fields) record[f] = row[f];
-      sheet.addRow(record);
+      sheet.addRow(params.fields.map((f) => row[f]));
     }
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
