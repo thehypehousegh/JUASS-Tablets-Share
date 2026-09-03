@@ -8,6 +8,8 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { uploadSpreadsheet } from "../middleware/upload";
 import { computeFormStatus, FORM_LABELS } from "../utils/academicYear";
+import { recordAudit } from "../utils/auditLog";
+import { deleteStudentsByIds } from "../utils/studentDelete";
 
 const router = Router();
 router.use(requireAuth);
@@ -140,21 +142,18 @@ router.post(
 
     const students = await prisma.student.findMany({ where, select: { id: true } });
     const studentIds = students.map((s) => s.id);
-    if (studentIds.length === 0) {
-      return res.json({ deletedStudents: 0, deletedAssignments: 0, deletedIssueReports: 0 });
+    const counts = await deleteStudentsByIds(studentIds);
+    if (counts.deletedStudents > 0) {
+      await recordAudit(req, {
+        action: "student.bulkDelete",
+        targetType: "Student",
+        targetLabel: [parsed.data.year && `Year Group ${parsed.data.year}`, parsed.data.className && `Class ${parsed.data.className}`]
+          .filter(Boolean)
+          .join(" + "),
+        details: counts,
+      });
     }
-
-    const [issueReports, assignments, deletedStudents] = await prisma.$transaction([
-      prisma.deviceIssueReport.deleteMany({ where: { assignment: { studentId: { in: studentIds } } } }),
-      prisma.deviceAssignment.deleteMany({ where: { studentId: { in: studentIds } } }),
-      prisma.student.deleteMany({ where: { id: { in: studentIds } } }),
-    ]);
-
-    res.json({
-      deletedStudents: deletedStudents.count,
-      deletedAssignments: assignments.count,
-      deletedIssueReports: issueReports.count,
-    });
+    res.json(counts);
   })
 );
 
@@ -210,7 +209,45 @@ router.patch(
       });
     if (student === "NOT_FOUND") return res.status(404).json({ error: "Student not found" });
     if (student === "DUPLICATE") return res.status(409).json({ error: "Another student already has this index number" });
+    await recordAudit(req, {
+      action: "student.update",
+      targetType: "Student",
+      targetId: student.id,
+      targetLabel: `${student.indexNumber} — ${student.fullName}`,
+      details: { fields: Object.keys(rest).concat(dateOfBirth !== undefined ? ["dateOfBirth"] : []) },
+    });
     res.json(student);
+  })
+);
+
+const eraseSchema = z.object({ confirmIndexNumber: z.string().min(1) });
+
+// Right-to-erasure for a single student — distinct from bulk-delete (which
+// is scoped to a whole year group or class): this removes exactly one
+// record, and only when the caller re-types that student's own index
+// number, so it can't be triggered by mis-clicking a row.
+router.delete(
+  "/:id/erase",
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const parsed = eraseSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Type the student's index number to confirm" });
+
+    const student = await prisma.student.findUnique({ where: { id: req.params.id } });
+    if (!student) return res.status(404).json({ error: "Student not found" });
+    if (parsed.data.confirmIndexNumber.trim() !== student.indexNumber) {
+      return res.status(400).json({ error: "Index number does not match — erasure cancelled" });
+    }
+
+    const counts = await deleteStudentsByIds([student.id]);
+    await recordAudit(req, {
+      action: "student.erase",
+      targetType: "Student",
+      targetId: student.id,
+      targetLabel: `${student.indexNumber} — ${student.fullName}`,
+      details: counts,
+    });
+    res.json(counts);
   })
 );
 
@@ -407,6 +444,10 @@ router.post(
       else updated++;
     }
 
+    await recordAudit(req, {
+      action: "student.import",
+      details: { created, updated, errorCount: errors.length, rowCount: rows.length },
+    });
     res.json({ created, updated, errors });
   })
 );
@@ -439,6 +480,13 @@ router.patch(
     const updated = await prisma.student.update({
       where: { id: student.id },
       data: { extraFields: merged as Prisma.InputJsonValue },
+    });
+    await recordAudit(req, {
+      action: "student.updateCustomFields",
+      targetType: "Student",
+      targetId: student.id,
+      targetLabel: `${student.indexNumber} — ${student.fullName}`,
+      details: { fields: Object.keys(parsed.data.values) },
     });
     res.json(updated);
   })

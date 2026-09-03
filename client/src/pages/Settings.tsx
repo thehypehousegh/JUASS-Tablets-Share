@@ -13,6 +13,21 @@ interface SyncStatus {
   oldestPendingBackupAt?: string;
 }
 
+interface RetentionPreviewStudent {
+  id: string;
+  indexNumber: string;
+  fullName: string;
+  className: string | null;
+  admissionYear: string | null;
+  yearsSinceCompletion: number | null;
+}
+
+interface RetentionPreview {
+  retentionYears: number;
+  studentCount: number;
+  students: RetentionPreviewStudent[];
+}
+
 export default function Settings() {
   const [totalTablets, setTotalTablets] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -29,8 +44,19 @@ export default function Settings() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<string | null>(null);
 
+  const [retentionYears, setRetentionYears] = useState<number | "">("");
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionMessage, setRetentionMessage] = useState<string | null>(null);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [purgeConfirmText, setPurgeConfirmText] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<string | null>(null);
+
   useEffect(() => {
     apiGet("/settings/total-tablets").then((r) => setTotalTablets(r.totalTablets)).catch(() => null);
+    apiGet("/retention/policy").then((r) => setRetentionYears(r.retentionYears ?? "")).catch(() => null);
     loadSyncStatus();
     const interval = setInterval(loadSyncStatus, 30000);
     return () => clearInterval(interval);
@@ -119,6 +145,61 @@ export default function Settings() {
     }
   }
 
+  async function saveRetentionPolicy(e: React.FormEvent) {
+    e.preventDefault();
+    if (retentionYears === "") return;
+    setRetentionSaving(true);
+    setRetentionMessage(null);
+    setRetentionError(null);
+    try {
+      await apiSend("PUT", "/retention/policy", { retentionYears: Number(retentionYears) });
+      setRetentionMessage("Saved.");
+      setRetentionPreview(null);
+    } catch (err) {
+      setRetentionError(err instanceof ApiError ? err.message : "Could not save the retention policy");
+    } finally {
+      setRetentionSaving(false);
+    }
+  }
+
+  async function previewRetentionPurge() {
+    setPreviewing(true);
+    setRetentionError(null);
+    setPurgeResult(null);
+    try {
+      setRetentionPreview(await apiGet("/retention/preview"));
+    } catch (err) {
+      setRetentionError(err instanceof ApiError ? err.message : "Could not load eligible records");
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function purgeRetention() {
+    if (purgeConfirmText !== "PURGE") return;
+    if (
+      !confirm(
+        `This permanently deletes ${retentionPreview?.studentCount ?? 0} student record(s) and their device history. This cannot be undone. Continue?`
+      )
+    ) {
+      return;
+    }
+    setPurging(true);
+    setRetentionError(null);
+    try {
+      const res = await apiSend("POST", "/retention/purge", { confirmText: purgeConfirmText });
+      setPurgeResult(
+        `Deleted ${res.deletedStudents} student(s), ${res.deletedAssignments} assignment(s), and ${res.deletedIssueReports} issue report(s).`
+      );
+      setPurgeConfirmText("");
+      setRetentionPreview(null);
+    } catch (err) {
+      setRetentionError(err instanceof ApiError ? err.message : "Could not purge these records");
+    } finally {
+      setPurging(false);
+    }
+  }
+
   return (
     <div className="page">
       <h2>Settings & Backup</h2>
@@ -189,6 +270,101 @@ export default function Settings() {
 
       {message && <p className="success-text">{message}</p>}
       {error && <p className="error-text">{error}</p>}
+
+      <div className="card">
+        <h3>Data Retention</h3>
+        <p className="hint-text">
+          Students who graduated (Form 3 completed) and whose device has already been returned or reported missing
+          can be purged automatically once they've been graduated this many years. Students still holding a device
+          are never purged, regardless of how long ago they graduated.
+        </p>
+        <form onSubmit={saveRetentionPolicy} className="filter-row">
+          <div className="field">
+            <label>Years after graduation before a record is eligible for purge</label>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={retentionYears}
+              onChange={(e) => setRetentionYears(e.target.value === "" ? "" : Number(e.target.value))}
+            />
+          </div>
+          <button type="submit" className="btn-primary" disabled={retentionSaving || retentionYears === ""}>
+            {retentionSaving ? "Saving…" : "Save Policy"}
+          </button>
+        </form>
+        {retentionMessage && <p className="success-text">{retentionMessage}</p>}
+        {retentionError && <p className="error-text">{retentionError}</p>}
+
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={previewRetentionPurge}
+          disabled={previewing || retentionYears === ""}
+        >
+          {previewing ? "Checking…" : "Preview Eligible Records"}
+        </button>
+
+        {retentionPreview && (
+          <>
+            <p className="hint-text">
+              {retentionPreview.studentCount} record(s) eligible for purge (graduated {retentionPreview.retentionYears}+
+              year(s) ago, device already accounted for).
+            </p>
+            {retentionPreview.studentCount > 0 && (
+              <>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Index Number</th>
+                        <th>Name</th>
+                        <th>Class</th>
+                        <th>Year Group</th>
+                        <th>Years Since Completion</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {retentionPreview.students.slice(0, 200).map((s) => (
+                        <tr key={s.id}>
+                          <td>{s.indexNumber}</td>
+                          <td>{s.fullName}</td>
+                          <td>{s.className || "—"}</td>
+                          <td>{s.admissionYear || "—"}</td>
+                          <td>{s.yearsSinceCompletion ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {retentionPreview.students.length > 200 && (
+                  <p className="hint-text">Showing the first 200 of {retentionPreview.studentCount} records.</p>
+                )}
+                <div className="grid-2">
+                  <div className="field">
+                    <label>Type PURGE to confirm</label>
+                    <input
+                      type="text"
+                      value={purgeConfirmText}
+                      onChange={(e) => setPurgeConfirmText(e.target.value)}
+                      placeholder="PURGE"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  disabled={purging || purgeConfirmText !== "PURGE"}
+                  onClick={purgeRetention}
+                >
+                  {purging ? "Purging…" : `Purge ${retentionPreview.studentCount} Record(s)`}
+                </button>
+              </>
+            )}
+          </>
+        )}
+        {purgeResult && <p className="success-text">{purgeResult}</p>}
+      </div>
 
       <form className="card card-danger" onSubmit={systemReset}>
         <h3>Danger Zone — System Reset</h3>

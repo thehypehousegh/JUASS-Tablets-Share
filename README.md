@@ -356,3 +356,34 @@ neutral otherwise.
   caller passes attacker-controlled buffers into `uuid`'s parse/stringify
   functions, which this app never does) — re-run `npm audit` periodically
   and update when a fix lands upstream.
+- Every sensitive action (student edits/deletes, custom field changes, user
+  management, backups, and system reset) is written to an append-only audit
+  log — see **Audit log, data retention, and erasure** below.
+
+## Audit log, data retention, and erasure
+
+- **Audit log** (Super Admin → Audit Log): every sensitive write — student
+  edits, imports, bulk delete, single-student erasure, custom field
+  create/delete, user create/update/unlock/password-reset/deactivate,
+  backup export/import, system reset, and retention policy changes/purges —
+  is recorded with who did it, their role at the time, when, and what
+  changed. The actor's name and role are captured as a snapshot at write
+  time, so an entry stays readable even after that account is later
+  deactivated or deleted. A password reset logs that it happened, never the
+  new password itself. Entries are never deleted by System Reset (or by
+  anything else in the app) — the log survives the data it describes.
+  Filterable by action, target type, and date range from the UI
+  (`GET /api/audit-log`).
+- **Data retention** (Settings & Backup → Data Retention): Super Admin sets
+  how many years past graduation (Form 3 completed) a student's record may
+  be purged. A student is only eligible once every device they've ever held
+  is accounted for — returned, or reported missing — so the purge can never
+  silently delete the one record proving a tablet is still outstanding
+  (same rule as the "Completed but Not Returned" report). Preview shows the
+  exact list before anything happens; purging requires typing "PURGE" to
+  confirm and is logged to the audit trail.
+- **Right to erasure** (Student Records → Erase, Super Admin only): deletes
+  one student and every device assignment/issue report tied to them,
+  independent of the year/class bulk-delete tool. Requires re-typing that
+  student's own index number to confirm, so it can't be triggered by a
+  stray click. Logged to the audit trail.

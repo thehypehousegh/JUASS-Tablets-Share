@@ -37,3 +37,12 @@ export function computeFormStatus(admissionYear: string | null | undefined, now:
 export function isCompleted(admissionYear: string | null | undefined, now: Date = new Date()): boolean {
   return computeFormStatus(admissionYear, now) === "COMPLETED";
 }
+
+// How many full academic years past graduation (Form 3) a student is —
+// null if they haven't completed yet. Used by the data-retention purge to
+// decide which graduated students' records are old enough to erase.
+export function yearsSinceCompletion(admissionYear: string | null | undefined, now: Date = new Date()): number | null {
+  if (computeFormStatus(admissionYear, now) !== "COMPLETED") return null;
+  const admissionYearNum = parseInt(admissionYear as string, 10);
+  return academicYearStart(now) - admissionYearNum - 3;
+}

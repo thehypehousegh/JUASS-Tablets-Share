@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { recordAudit } from "../utils/auditLog";
 
 const router = Router();
 router.use(requireAuth);
@@ -74,6 +75,12 @@ router.post(
     }
 
     const field = await prisma.customField.create({ data: { key, label } });
+    await recordAudit(req, {
+      action: "customField.create",
+      targetType: "CustomField",
+      targetId: field.id,
+      targetLabel: field.label,
+    });
     res.status(201).json(field);
   })
 );
@@ -85,7 +92,15 @@ router.delete(
     // Only removes the field definition itself — any values already saved
     // under this key in a student's extraFields are left in place, so
     // deleting a field by mistake doesn't silently destroy imported data.
-    await prisma.customField.delete({ where: { id: req.params.id } }).catch(() => null);
+    const field = await prisma.customField.delete({ where: { id: req.params.id } }).catch(() => null);
+    if (field) {
+      await recordAudit(req, {
+        action: "customField.delete",
+        targetType: "CustomField",
+        targetId: field.id,
+        targetLabel: field.label,
+      });
+    }
     res.status(204).end();
   })
 );

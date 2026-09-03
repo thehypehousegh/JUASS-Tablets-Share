@@ -8,6 +8,7 @@ import { applyBackup, BACKUP_VERSION, buildBackupPayload } from "../utils/backup
 import { comparePassword } from "../utils/password";
 import { secretsMatch } from "../utils/secret";
 import { getSyncStatus, runSyncNow } from "../sync";
+import { recordAudit } from "../utils/auditLog";
 
 const router = Router();
 
@@ -39,8 +40,12 @@ router.get(
   "/export",
   requireAuth,
   requireRole("SUPER_ADMIN"),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const backup = await buildBackupPayload();
+    await recordAudit(req, {
+      action: "backup.export",
+      details: { students: backup.students.length, users: backup.users.length },
+    });
     res.setHeader("Content-Type", "application/json");
     res.setHeader(
       "Content-Disposition",
@@ -67,6 +72,7 @@ router.post(
       return res.status(400).json({ error: "Unrecognized or incompatible backup file" });
     }
     const counts = await applyBackup(backup);
+    await recordAudit(req, { action: "backup.import", details: counts });
     res.json({ ok: true, imported: counts });
   })
 );
@@ -107,16 +113,15 @@ router.post(
       prisma.customField.deleteMany({}),
     ]);
 
-    res.json({
-      ok: true,
-      deleted: {
-        students: students.count,
-        assignments: assignments.count,
-        issueReports: issueReports.count,
-        chatMessages: chatMessages.count,
-        customFields: customFields.count,
-      },
-    });
+    const deleted = {
+      students: students.count,
+      assignments: assignments.count,
+      issueReports: issueReports.count,
+      chatMessages: chatMessages.count,
+      customFields: customFields.count,
+    };
+    await recordAudit(req, { action: "system.reset", details: deleted });
+    res.json({ ok: true, deleted });
   })
 );
 

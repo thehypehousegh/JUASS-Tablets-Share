@@ -97,6 +97,11 @@ export default function Layout() {
               Settings & Backup
             </NavLink>
           )}
+          {isAdmin && (
+            <NavLink to="/audit-log" className={({ isActive }) => (isActive ? "active" : "")}>
+              Audit Log
+            </NavLink>
+          )}
           <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : "")}>
             Chat{unread > 0 ? ` (${unread})` : ""}
           </NavLink>

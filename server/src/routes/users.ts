@@ -5,6 +5,7 @@ import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { generateTempPassword, hashPassword } from "../utils/password";
+import { recordAudit } from "../utils/auditLog";
 
 const router = Router();
 router.use(requireAuth, requireRole("SUPER_ADMIN"));
@@ -53,6 +54,14 @@ router.post(
       .catch(() => null);
     if (!user) return res.status(409).json({ error: "A user with this email already exists" });
 
+    await recordAudit(req, {
+      action: "user.create",
+      targetType: "User",
+      targetId: user.id,
+      targetLabel: `${user.name} <${user.email}>`,
+      details: { role: user.role },
+    });
+
     res.status(201).json({
       id: user.id,
       name: user.name,
@@ -78,6 +87,13 @@ router.patch(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
     const user = await prisma.user.update({ where: { id: req.params.id }, data: parsed.data }).catch(() => null);
     if (!user) return res.status(404).json({ error: "User not found" });
+    await recordAudit(req, {
+      action: "user.update",
+      targetType: "User",
+      targetId: user.id,
+      targetLabel: `${user.name} <${user.email}>`,
+      details: { fields: Object.keys(parsed.data) },
+    });
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role, active: user.active });
   })
 );
@@ -89,6 +105,12 @@ router.post(
       .update({ where: { id: req.params.id }, data: { failedLoginAttempts: 0, lockedUntil: null } })
       .catch(() => null);
     if (!user) return res.status(404).json({ error: "User not found" });
+    await recordAudit(req, {
+      action: "user.unlock",
+      targetType: "User",
+      targetId: user.id,
+      targetLabel: `${user.name} <${user.email}>`,
+    });
     res.json({ ok: true });
   })
 );
@@ -117,6 +139,15 @@ router.post(
       },
     });
 
+    // Never store the plaintext password in the audit trail — only that a
+    // reset happened, same as the target user's identity.
+    await recordAudit(req, {
+      action: "user.resetPassword",
+      targetType: "User",
+      targetId: user.id,
+      targetLabel: `${user.name} <${user.email}>`,
+    });
+
     res.json({ ok: true, newPassword });
   })
 );
@@ -129,6 +160,12 @@ router.delete(
     }
     const user = await prisma.user.update({ where: { id: req.params.id }, data: { active: false } }).catch(() => null);
     if (!user) return res.status(404).json({ error: "User not found" });
+    await recordAudit(req, {
+      action: "user.deactivate",
+      targetType: "User",
+      targetId: user.id,
+      targetLabel: `${user.name} <${user.email}>`,
+    });
     res.json({ ok: true });
   })
 );

@@ -177,3 +177,26 @@ model CustomField {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// A record of who did what to sensitive data, and when — student PII is
+// minors' data, so admin actions that create, change, or destroy it need
+// to be traceable after the fact, not just visible in the moment. Actor
+// name/role are denormalized (copied at write time) so a log entry still
+// reads correctly even if that User account is later deactivated or
+// deleted; actorId is kept too where the account still exists.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  actorName   String
+  actorRole   String
+  action      String
+  targetType  String?
+  targetId    String?
+  targetLabel String?
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([targetType, targetId])
+}

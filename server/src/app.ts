@@ -15,6 +15,8 @@ import settingsRoutes from "./routes/settings";
 import backupRoutes from "./routes/backup";
 import reportsRoutes from "./routes/reports";
 import customFieldsRoutes from "./routes/customFields";
+import auditLogRoutes from "./routes/auditLog";
+import retentionRoutes from "./routes/retention";
 
 export function createApp() {
   const app = express();
@@ -48,6 +50,8 @@ export function createApp() {
   app.use("/api/backup", backupRoutes);
   app.use("/api/reports", reportsRoutes);
   app.use("/api/custom-fields", customFieldsRoutes);
+  app.use("/api/audit-log", auditLogRoutes);
+  app.use("/api/retention", retentionRoutes);
 
   // Serve the built React app in production (single deployable service).
   const clientDist = path.resolve(__dirname, "../../client/dist");

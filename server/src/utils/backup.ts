@@ -12,10 +12,11 @@ export interface BackupPayload {
   chatMessages: unknown[];
   settings: unknown[];
   customFields: unknown[];
+  auditLog: unknown[];
 }
 
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [users, students, assignments, issueReports, chatMessages, settings, customFields] = await Promise.all([
+  const [users, students, assignments, issueReports, chatMessages, settings, customFields, auditLog] = await Promise.all([
     prisma.user.findMany(),
     prisma.student.findMany(),
     prisma.deviceAssignment.findMany(),
@@ -23,6 +24,7 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     prisma.chatMessage.findMany(),
     prisma.setting.findMany(),
     prisma.customField.findMany(),
+    prisma.auditLog.findMany(),
   ]);
 
   return {
@@ -35,6 +37,7 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     chatMessages,
     settings,
     customFields,
+    auditLog,
   };
 }
 
@@ -46,6 +49,7 @@ export interface ApplyCounts {
   chatMessages: number;
   settings: number;
   customFields: number;
+  auditLog: number;
 }
 
 // Restore/merge: upserts every record by its original id, so applying the
@@ -60,6 +64,7 @@ export async function applyBackup(backup: any): Promise<ApplyCounts> {
     chatMessages: 0,
     settings: 0,
     customFields: 0,
+    auditLog: 0,
   };
 
   for (const u of backup.users || []) {
@@ -95,6 +100,13 @@ export async function applyBackup(backup: any): Promise<ApplyCounts> {
     const { id, ...data } = f;
     await prisma.customField.upsert({ where: { id }, create: { id, ...data }, update: data }).catch(() => null);
     counts.customFields++;
+  }
+  // Audit log entries are append-only by design — never updated once
+  // written, so a plain upsert-by-id is safe and idempotent here too.
+  for (const a of backup.auditLog || []) {
+    const { id, ...data } = a;
+    await prisma.auditLog.upsert({ where: { id }, create: { id, ...data }, update: data }).catch(() => null);
+    counts.auditLog++;
   }
 
   return counts;

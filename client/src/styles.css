@@ -249,6 +249,10 @@ input:disabled {
   text-decoration: underline;
 }
 
+.btn-link-danger {
+  color: var(--danger);
+}
+
 .btn-icon {
   background: var(--bg);
   border: 1px solid var(--border);

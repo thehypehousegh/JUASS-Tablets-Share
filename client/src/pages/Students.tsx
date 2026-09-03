@@ -49,6 +49,7 @@ export default function Students() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<StudentRow | null>(null);
+  const [erasing, setErasing] = useState<StudentRow | null>(null);
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
   const [hiddenFields, setHiddenFields] = useState<string[]>([]);
 
@@ -148,9 +149,12 @@ export default function Students() {
                   {showYear && <td>{s.admissionYear || "—"}</td>}
                   <td>{s.assignments[0] ? <StatusBadge status={s.assignments[0].status} /> : "Not yet received"}</td>
                   {isAdmin && (
-                    <td>
+                    <td className="actions-cell">
                       <button className="btn-link" onClick={() => setEditing(s)}>
                         Edit
+                      </button>
+                      <button className="btn-link btn-link-danger" onClick={() => setErasing(s)}>
+                        Erase
                       </button>
                     </td>
                   )}
@@ -192,6 +196,94 @@ export default function Students() {
           }}
         />
       )}
+
+      {erasing && (
+        <EraseStudentModal
+          student={erasing}
+          onClose={() => setErasing(null)}
+          onErased={(id) => {
+            setRows((rs) => rs.filter((r) => r.id !== id));
+            setErasing(null);
+            loadFilterOptions();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EraseStudentModal({
+  student,
+  onClose,
+  onErased,
+}: {
+  student: StudentRow;
+  onClose: () => void;
+  onErased: (id: string) => void;
+}) {
+  const [confirmIndexNumber, setConfirmIndexNumber] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function erase() {
+    if (confirmIndexNumber.trim() !== student.indexNumber) return;
+    if (
+      !confirm(
+        `This permanently deletes ${student.fullName} (${student.indexNumber}) and every device assignment or issue report tied to them. This cannot be undone. Continue?`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend("DELETE", `/students/${student.id}/erase`, { confirmIndexNumber });
+      onErased(student.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not erase this record");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal">
+        <div className="modal-header">
+          <h3>Erase Student Record</h3>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <p className="warn-text">
+          Permanently deletes <strong>{student.fullName}</strong> ({student.indexNumber}) and every device
+          assignment or issue report tied to them. This cannot be undone — download a backup first (Settings &
+          Backup) if there's any doubt.
+        </p>
+        <div className="field">
+          <label>Type the index number ({student.indexNumber}) to confirm</label>
+          <input
+            type="text"
+            value={confirmIndexNumber}
+            onChange={(e) => setConfirmIndexNumber(e.target.value)}
+            placeholder={student.indexNumber}
+          />
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        <div className="actions-cell">
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={busy || confirmIndexNumber.trim() !== student.indexNumber}
+            onClick={erase}
+          >
+            {busy ? "Erasing…" : "Erase Permanently"}
+          </button>
+          <button type="button" className="btn-link" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
