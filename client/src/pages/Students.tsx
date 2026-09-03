@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiSend, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import StatusBadge from "../components/StatusBadge";
 
 interface StudentRow {
   id: string;
@@ -145,7 +146,7 @@ export default function Students() {
                   {showGender && <td>{s.gender || "—"}</td>}
                   {showClass && <td>{s.className || "—"}</td>}
                   {showYear && <td>{s.admissionYear || "—"}</td>}
-                  <td>{s.assignments.length > 0 ? "Has a device" : "Not yet received"}</td>
+                  <td>{s.assignments[0] ? <StatusBadge status={s.assignments[0].status} /> : "Not yet received"}</td>
                   {isAdmin && (
                     <td>
                       <button className="btn-link" onClick={() => setEditing(s)}>

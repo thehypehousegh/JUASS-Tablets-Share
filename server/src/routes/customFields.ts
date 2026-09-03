@@ -17,6 +17,27 @@ function slugify(label: string) {
   );
 }
 
+function normalize(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Common spellings for the one built-in field where a duplicate custom
+// field genuinely causes confusion — a per-student index-number-like
+// value that can silently drift from the real, unique indexNumber column.
+// (Client-side AssignmentForm.tsx keeps a matching list to hide any such
+// field that slips in some other way, e.g. from data imported before this
+// guard existed.)
+const INDEX_NUMBER_SYNONYMS = new Set([
+  "indexno",
+  "indexnumber",
+  "indexnum",
+  "idno",
+  "studentid",
+  "studentindex",
+  "admissionno",
+  "admissionnumber",
+]);
+
 router.get(
   "/",
   asyncHandler(async (_req, res) => {
@@ -34,6 +55,12 @@ router.post(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
     const label = parsed.data.label;
+
+    if (INDEX_NUMBER_SYNONYMS.has(normalize(label))) {
+      return res.status(400).json({
+        error: 'This duplicates the built-in Index Number field — map the file column to "Index Number" instead of creating a new field for it.',
+      });
+    }
 
     const existing = await prisma.customField.findFirst({ where: { label: { equals: label, mode: "insensitive" } } });
     if (existing) return res.json(existing);

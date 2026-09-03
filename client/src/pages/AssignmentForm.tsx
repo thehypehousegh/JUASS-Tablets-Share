@@ -27,6 +27,32 @@ interface CustomFieldDef {
   label: string;
 }
 
+interface SearchResult {
+  indexNumber: string;
+  fullName: string;
+  className: string | null;
+  admissionYear: string | null;
+}
+
+// Mirrors the server's INDEX_NUMBER_SYNONYMS (customFields.ts) — a custom
+// field like this can only be leftover data from before that guard
+// existed, and showing it here would just duplicate the real Index Number
+// field above with a value that can silently drift from it.
+const INDEX_NUMBER_SYNONYMS = new Set([
+  "indexno",
+  "indexnumber",
+  "indexnum",
+  "idno",
+  "studentid",
+  "studentindex",
+  "admissionno",
+  "admissionnumber",
+]);
+function isIndexNumberLike(f: { key: string; label: string }) {
+  const normalized = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return INDEX_NUMBER_SYNONYMS.has(normalized(f.key)) || INDEX_NUMBER_SYNONYMS.has(normalized(f.label));
+}
+
 const READONLY_FIELDS: { key: keyof StudentRecord; label: string }[] = [
   { key: "fullName", label: "Full Name" },
   { key: "gender", label: "Gender" },
@@ -41,8 +67,9 @@ const READONLY_FIELDS: { key: keyof StudentRecord; label: string }[] = [
 export default function AssignmentForm() {
   const { user } = useAuth();
   const isAdmin = user?.role === "SUPER_ADMIN";
-  const [indexNumber, setIndexNumber] = useState("");
+  const [query, setQuery] = useState("");
   const [student, setStudent] = useState<StudentRecord | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -69,16 +96,13 @@ export default function AssignmentForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
+  async function loadStudent(idx: string) {
     setSearchError(null);
-    setMessage(null);
-    setStudent(null);
-    if (!indexNumber.trim()) return;
     setSearching(true);
     try {
-      const data: StudentRecord = await apiGet(`/students/${encodeURIComponent(indexNumber.trim())}`);
+      const data: StudentRecord = await apiGet(`/students/${encodeURIComponent(idx)}`);
       setStudent(data);
+      setSearchResults(null);
       const values: Record<string, string> = {};
       for (const f of customFields) values[f.key] = String(data.extraFields?.[f.key] ?? "");
       setCustomValues(values);
@@ -87,6 +111,39 @@ export default function AssignmentForm() {
     } catch (err) {
       setSearchError(err instanceof ApiError ? err.message : "Search failed");
     } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    setSearchError(null);
+    setMessage(null);
+    setStudent(null);
+    setSearchResults(null);
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const matches: SearchResult[] = await apiGet(`/students?q=${encodeURIComponent(q)}`);
+      // Sorted by Index Number, then Name, so a list of matches (e.g.
+      // several students sharing a surname) is easy to scan.
+      const sorted = [...matches].sort(
+        (a, b) => a.indexNumber.localeCompare(b.indexNumber) || a.fullName.localeCompare(b.fullName)
+      );
+      if (sorted.length === 0) {
+        setSearchError("No student found matching that name or index number");
+        setSearching(false);
+        return;
+      }
+      if (sorted.length === 1) {
+        await loadStudent(sorted[0].indexNumber);
+        return;
+      }
+      setSearchResults(sorted);
+      setSearching(false);
+    } catch (err) {
+      setSearchError(err instanceof ApiError ? err.message : "Search failed");
       setSearching(false);
     }
   }
@@ -170,13 +227,13 @@ export default function AssignmentForm() {
         setMessage("You are offline. This assignment has been saved on this device and will sync automatically once you're back online.");
         resetDeviceFields();
         setStudent(null);
-        setIndexNumber("");
+        setQuery("");
       } else {
         await apiSend("POST", "/assignments", body);
         setMessage(`Device assigned to ${student.fullName}.`);
         resetDeviceFields();
         setStudent(null);
-        setIndexNumber("");
+        setQuery("");
       }
     } catch (err) {
       if (err instanceof ApiError) {
@@ -188,7 +245,7 @@ export default function AssignmentForm() {
         setMessage("Could not reach the server. Saved on this device and will sync automatically once connection returns.");
         resetDeviceFields();
         setStudent(null);
-        setIndexNumber("");
+        setQuery("");
       }
     } finally {
       setSubmitting(false);
@@ -203,12 +260,12 @@ export default function AssignmentForm() {
 
       <form className="card search-row" onSubmit={handleSearch}>
         <div className="field grow">
-          <label>Student Index Number</label>
+          <label>Student Name or Index Number</label>
           <input
             type="text"
-            value={indexNumber}
-            onChange={(e) => setIndexNumber(e.target.value)}
-            placeholder="e.g. JUASS-2026-0001"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="e.g. JUASS-2026-0001 or Achiaa Margaret"
             required
           />
         </div>
@@ -217,6 +274,40 @@ export default function AssignmentForm() {
         </button>
       </form>
       {searchError && <p className="error-text">{searchError}</p>}
+
+      {searchResults && (
+        <div className="card">
+          <h3>{searchResults.length} students match — pick one</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Index No.</th>
+                  <th>Name</th>
+                  <th>Class</th>
+                  <th>Year Group</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchResults.map((r) => (
+                  <tr key={r.indexNumber}>
+                    <td>{r.indexNumber}</td>
+                    <td>{r.fullName}</td>
+                    <td>{r.className || "—"}</td>
+                    <td>{r.admissionYear || "—"}</td>
+                    <td>
+                      <button className="btn-link" onClick={() => loadStudent(r.indexNumber)} disabled={searching}>
+                        Select
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {student && (
         <div className="card">
@@ -290,34 +381,49 @@ export default function AssignmentForm() {
             </div>
           )}
 
-          {customFields.length > 0 && (
-            <div className="section-heading">
-              <h4>Additional Details</h4>
-              <p className="hint-text">
-                These fields aren't part of the admission data import — fill in what's missing for this student.
-              </p>
-              <div className="grid-2">
-                {customFields.map((f) => (
-                  <div className="field" key={f.key}>
-                    <label>{f.label}</label>
-                    <input
-                      type="text"
-                      value={customValues[f.key] || ""}
-                      onChange={(e) => {
-                        setCustomValues((v) => ({ ...v, [f.key]: e.target.value }));
-                        setCustomSaved(false);
-                      }}
-                    />
-                  </div>
-                ))}
+          {(() => {
+            // Only fields genuinely missing for this student belong here —
+            // the point is filling gaps while assigning, not re-editing data
+            // that's already there (do that from Student Records instead).
+            // Index-Number-like fields never belong here at all: Index
+            // Number already has its own field above, and a second,
+            // independently-typed copy can only drift out of sync with it.
+            const missingCustomFields = customFields.filter((f) => {
+              if (isIndexNumberLike(f)) return false;
+              const val = student.extraFields?.[f.key];
+              return val === undefined || val === null || String(val).trim() === "";
+            });
+            if (missingCustomFields.length === 0) return null;
+            return (
+              <div className="section-heading">
+                <h4>Additional Details</h4>
+                <p className="hint-text">
+                  These fields aren't part of the admission data import and are still missing for this student — fill
+                  in what you can. (Fields that already have data can be edited from Student Records instead.)
+                </p>
+                <div className="grid-2">
+                  {missingCustomFields.map((f) => (
+                    <div className="field" key={f.key}>
+                      <label>{f.label}</label>
+                      <input
+                        type="text"
+                        value={customValues[f.key] || ""}
+                        onChange={(e) => {
+                          setCustomValues((v) => ({ ...v, [f.key]: e.target.value }));
+                          setCustomSaved(false);
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {customError && <p className="error-text">{customError}</p>}
+                {customSaved && <p className="success-text">Saved.</p>}
+                <button type="button" className="btn-secondary" onClick={saveCustomFields} disabled={customSaving}>
+                  {customSaving ? "Saving…" : "Save Additional Details"}
+                </button>
               </div>
-              {customError && <p className="error-text">{customError}</p>}
-              {customSaved && <p className="success-text">Saved.</p>}
-              <button type="button" className="btn-secondary" onClick={saveCustomFields} disabled={customSaving}>
-                {customSaving ? "Saving…" : "Save Additional Details"}
-              </button>
-            </div>
-          )}
+            );
+          })()}
 
           <form onSubmit={handleSubmit} className={activeAssignment ? "disabled-form" : undefined}>
             <h4>Device Details (recorded at distribution)</h4>

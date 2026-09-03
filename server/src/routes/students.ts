@@ -47,7 +47,11 @@ router.get(
           year ? { admissionYear: year } : {},
         ],
       },
-      include: { assignments: { where: { status: { in: ["WITH_STUDENT", "REPLACED"] } }, take: 1, orderBy: { createdAt: "desc" } } },
+      // No status filter here — a student's most recent assignment might be
+      // RETURNED, and that's still meaningful ("has received a device
+      // before") rather than "not yet received", which a WITH_STUDENT/
+      // REPLACED-only filter would otherwise misreport.
+      include: { assignments: { take: 1, orderBy: { createdAt: "desc" } } },
       take: 200,
       orderBy: [{ admissionYear: "desc" }, { className: "asc" }, { fullName: "asc" }],
     });

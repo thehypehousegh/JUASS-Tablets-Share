@@ -77,6 +77,9 @@ export default function ImportStudents() {
   const [hiddenFieldsInitial, setHiddenFieldsInitial] = useState<string[]>([]);
   const [hideOverrides, setHideOverrides] = useState<Record<string, boolean>>({});
 
+  const [deletingFieldId, setDeletingFieldId] = useState<string | null>(null);
+  const [manageFieldsError, setManageFieldsError] = useState<string | null>(null);
+
   const allFields: FieldDef[] = [...builtinFields, ...customFields.map((f) => ({ key: f.key, label: f.label, required: false }))];
 
   function loadCustomFields() {
@@ -105,6 +108,26 @@ export default function ImportStudents() {
       setAddFieldError(err instanceof ApiError ? err.message : "Could not add this field");
     } finally {
       setAddingField(false);
+    }
+  }
+
+  async function deleteCustomField(field: CustomFieldDef) {
+    if (!confirm(`Remove the "${field.label}" field? Any values already saved under it stay on students' records, but it will no longer be selectable for mapping, reports, or the Assignment form.`)) {
+      return;
+    }
+    setDeletingFieldId(field.id);
+    setManageFieldsError(null);
+    try {
+      await apiSend("DELETE", `/custom-fields/${field.id}`);
+      setCustomFields((f) => f.filter((existing) => existing.id !== field.id));
+      setSelection((m) => {
+        const { [field.key]: _removed, ...rest } = m;
+        return rest;
+      });
+    } catch (err) {
+      setManageFieldsError(err instanceof ApiError ? err.message : "Could not remove this field");
+    } finally {
+      setDeletingFieldId(null);
     }
   }
 
@@ -279,6 +302,33 @@ export default function ImportStudents() {
         </button>
       </form>
       {error && <p className="error-text">{error}</p>}
+
+      {customFields.length > 0 && (
+        <div className="card">
+          <h3>Custom Fields</h3>
+          <p className="hint-text">
+            Fields defined so far, beyond the built-in list — reusable across imports, the Assignment form, and
+            Reports. Remove one that was created by mistake or a duplicate; values already saved under it stay on
+            students' records, just no longer selectable anywhere new.
+          </p>
+          <div className="checkbox-grid">
+            {customFields.map((f) => (
+              <div key={f.id} className="actions-cell">
+                <span>{f.label}</span>
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => deleteCustomField(f)}
+                  disabled={deletingFieldId === f.id}
+                >
+                  {deletingFieldId === f.id ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            ))}
+          </div>
+          {manageFieldsError && <p className="error-text">{manageFieldsError}</p>}
+        </div>
+      )}
 
       {sheetOptions && (
         <div className="card">
@@ -548,16 +598,22 @@ export default function ImportStudents() {
       )}
 
       {result && (
-        <div className="card success-text">
-          <p>
+        <div className="card">
+          <p className="success-text">
             Imported: {result.created} new, {result.updated} updated.
           </p>
           {result.errors.length > 0 && (
-            <ul>
-              {result.errors.map((e, i) => (
-                <li key={i}>{e}</li>
-              ))}
-            </ul>
+            <>
+              <p className="error-text">
+                {result.errors.length} row(s) were skipped and need fixing in the source file before re-importing —
+                most commonly a missing Index Number, which is required to identify the student:
+              </p>
+              <ul className="error-text">
+                {result.errors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}
