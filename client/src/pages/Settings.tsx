@@ -23,6 +23,12 @@ export default function Settings() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
 
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+
   useEffect(() => {
     apiGet("/settings/total-tablets").then((r) => setTotalTablets(r.totalTablets)).catch(() => null);
     loadSyncStatus();
@@ -66,6 +72,29 @@ export default function Settings() {
       await apiDownload("/backup/export", "juass-tablets-backup.json");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not export backup");
+    }
+  }
+
+  async function systemReset(e: React.FormEvent) {
+    e.preventDefault();
+    if (resetConfirmText !== "DELETE ALL") return;
+    if (!confirm("This permanently deletes ALL student, device, issue-report, chat, and custom-field data. This cannot be undone. Continue?")) {
+      return;
+    }
+    setResetting(true);
+    setResetError(null);
+    setResetResult(null);
+    try {
+      const res = await apiSend("POST", "/backup/system-reset", { password: resetPassword, confirmText: resetConfirmText });
+      setResetResult(
+        `Deleted ${res.deleted.students} student(s), ${res.deleted.assignments} assignment(s), ${res.deleted.issueReports} issue report(s), ${res.deleted.chatMessages} chat message(s), and ${res.deleted.customFields} custom field(s). User accounts were kept.`
+      );
+      setResetPassword("");
+      setResetConfirmText("");
+    } catch (err) {
+      setResetError(err instanceof ApiError ? err.message : "Could not reset the system");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -160,6 +189,39 @@ export default function Settings() {
 
       {message && <p className="success-text">{message}</p>}
       {error && <p className="error-text">{error}</p>}
+
+      <form className="card card-danger" onSubmit={systemReset}>
+        <h3>Danger Zone — System Reset</h3>
+        <p className="warn-text">
+          Permanently deletes every student record, device assignment, issue report, chat message, and custom field
+          definition. User accounts are kept, so nobody is locked out. This cannot be undone — download a backup
+          above first if there's any doubt.
+        </p>
+        <div className="grid-2">
+          <div className="field">
+            <label>Confirm your password</label>
+            <input
+              type="password"
+              value={resetPassword}
+              onChange={(e) => setResetPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </div>
+          <div className="field">
+            <label>Type DELETE ALL to confirm</label>
+            <input type="text" value={resetConfirmText} onChange={(e) => setResetConfirmText(e.target.value)} placeholder="DELETE ALL" />
+          </div>
+        </div>
+        <button
+          type="submit"
+          className="btn-danger"
+          disabled={resetting || !resetPassword || resetConfirmText !== "DELETE ALL"}
+        >
+          {resetting ? "Resetting…" : "Reset System"}
+        </button>
+        {resetError && <p className="error-text">{resetError}</p>}
+        {resetResult && <p className="success-text">{resetResult}</p>}
+      </form>
     </div>
   );
 }

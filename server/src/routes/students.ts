@@ -11,7 +11,7 @@ import { uploadSpreadsheet } from "../middleware/upload";
 const router = Router();
 router.use(requireAuth);
 
-const STUDENT_FIELDS = [
+export const STUDENT_FIELDS = [
   { key: "indexNumber", label: "Index Number", required: true },
   { key: "fullName", label: "Full Name", required: true },
   { key: "gender", label: "Gender", required: false },

@@ -1,8 +1,11 @@
 import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../db";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { uploadJson } from "../middleware/upload";
 import { asyncHandler } from "../utils/asyncHandler";
 import { applyBackup, BACKUP_VERSION, buildBackupPayload } from "../utils/backup";
+import { comparePassword } from "../utils/password";
 import { secretsMatch } from "../utils/secret";
 import { getSyncStatus, runSyncNow } from "../sync";
 
@@ -65,6 +68,55 @@ router.post(
     }
     const counts = await applyBackup(backup);
     res.json({ ok: true, imported: counts });
+  })
+);
+
+const resetSchema = z.object({
+  password: z.string().min(1, "Enter your password"),
+  confirmText: z.string(),
+});
+
+// Full data wipe — students, device assignments, issue reports, chat
+// messages, and custom field definitions. User accounts are deliberately
+// left untouched so nobody (including the admin doing the reset) gets
+// locked out, and the school can start re-importing immediately. Gated
+// behind the acting admin's own password (re-entered, not just "still
+// logged in") plus a literal "DELETE ALL" confirmation, since this cannot
+// be undone short of restoring an export from Settings & Backup.
+router.post(
+  "/system-reset",
+  requireAuth,
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const parsed = resetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request" });
+    if (parsed.data.confirmText !== "DELETE ALL") {
+      return res.status(400).json({ error: 'Type "DELETE ALL" exactly to confirm' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) return res.status(401).json({ error: "Session invalid" });
+    const passwordOk = await comparePassword(parsed.data.password, user.passwordHash);
+    if (!passwordOk) return res.status(401).json({ error: "Incorrect password" });
+
+    const [issueReports, assignments, students, chatMessages, customFields] = await prisma.$transaction([
+      prisma.deviceIssueReport.deleteMany({}),
+      prisma.deviceAssignment.deleteMany({}),
+      prisma.student.deleteMany({}),
+      prisma.chatMessage.deleteMany({}),
+      prisma.customField.deleteMany({}),
+    ]);
+
+    res.json({
+      ok: true,
+      deleted: {
+        students: students.count,
+        assignments: assignments.count,
+        issueReports: issueReports.count,
+        chatMessages: chatMessages.count,
+        customFields: customFields.count,
+      },
+    });
   })
 );
 

@@ -40,6 +40,11 @@ type ParseResponse = ParsedResult | SheetSelectionResult | HeaderSelectionResult
 // import" rather than reading a column from the file.
 const CONSTANT_MODE = "__constant__";
 
+// Which built-in fields actually show as a column on the Student Records
+// table — the only ones a "hide from Student Records" toggle would do
+// anything visible for.
+const DISPLAYABLE_TABLE_FIELDS = new Set(["gender", "className", "admissionYear"]);
+
 export default function ImportStudents() {
   const [builtinFields, setBuiltinFields] = useState<FieldDef[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
@@ -69,6 +74,9 @@ export default function ImportStudents() {
   const [columnNames, setColumnNames] = useState<string[]>([]);
   const [namingConfirmed, setNamingConfirmed] = useState(false);
 
+  const [hiddenFieldsInitial, setHiddenFieldsInitial] = useState<string[]>([]);
+  const [hideOverrides, setHideOverrides] = useState<Record<string, boolean>>({});
+
   const allFields: FieldDef[] = [...builtinFields, ...customFields.map((f) => ({ key: f.key, label: f.label, required: false }))];
 
   function loadCustomFields() {
@@ -80,6 +88,9 @@ export default function ImportStudents() {
   useEffect(() => {
     apiGet("/students/fields").then(setBuiltinFields).catch(() => setBuiltinFields([]));
     loadCustomFields();
+    apiGet("/settings/hidden-fields")
+      .then((r) => setHiddenFieldsInitial(r.hiddenFields))
+      .catch(() => setHiddenFieldsInitial([]));
   }, []);
 
   async function addCustomField() {
@@ -90,6 +101,23 @@ export default function ImportStudents() {
       const field: CustomFieldDef = await apiSend("POST", "/custom-fields", { label: newFieldLabel.trim() });
       setCustomFields((f) => (f.some((existing) => existing.key === field.key) ? f : [...f, field]));
       setNewFieldLabel("");
+    } catch (err) {
+      setAddFieldError(err instanceof ApiError ? err.message : "Could not add this field");
+    } finally {
+      setAddingField(false);
+    }
+  }
+
+  // Faster path than typing a new field name from scratch — turn a file
+  // column that isn't matched to anything directly into a custom field,
+  // using the column's own name as the field's label, and map it in one step.
+  async function makeColumnAField(header: string) {
+    setAddingField(true);
+    setAddFieldError(null);
+    try {
+      const field: CustomFieldDef = await apiSend("POST", "/custom-fields", { label: header });
+      setCustomFields((f) => (f.some((existing) => existing.key === field.key) ? f : [...f, field]));
+      setSelection((m) => ({ ...m, [field.key]: header }));
     } catch (err) {
       setAddFieldError(err instanceof ApiError ? err.message : "Could not add this field");
     } finally {
@@ -205,8 +233,30 @@ export default function ImportStudents() {
       }
       const res = await apiSend("POST", "/students/import/commit", { mapping, constants: finalConstants, rows: parsed.rows });
       setResult(res);
+
+      // A field that just got data via this import (mapped or constant)
+      // should come back into view if it was previously hidden; a field the
+      // admin explicitly toggled in the "not used in this import" list
+      // above gets hidden or shown per that choice. Anything untouched
+      // keeps its current global visibility.
+      try {
+        const hiddenSet = new Set(hiddenFieldsInitial);
+        for (const key of Object.keys(mapping)) hiddenSet.delete(key);
+        for (const key of Object.keys(finalConstants)) hiddenSet.delete(key);
+        for (const [key, hide] of Object.entries(hideOverrides)) {
+          if (hide) hiddenSet.add(key);
+          else hiddenSet.delete(key);
+        }
+        const hiddenFields = Array.from(hiddenSet);
+        await apiSend("PUT", "/settings/hidden-fields", { hiddenFields });
+        setHiddenFieldsInitial(hiddenFields);
+      } catch {
+        // Best-effort — don't block the import result on this.
+      }
+
       setParsed(null);
       setFile(null);
+      setHideOverrides({});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Import failed");
     } finally {
@@ -378,6 +428,34 @@ export default function ImportStudents() {
             empty until a distributor or admin fills them in later, per student.
           </p>
 
+          {(() => {
+            const usedHeaders = new Set(
+              Object.values(selection).filter((v) => v && v !== CONSTANT_MODE)
+            );
+            const unmatchedColumns = parsed.headers.filter((h) => !usedHeaders.has(h));
+            if (unmatchedColumns.length === 0) return null;
+            return (
+              <div className="section-heading">
+                <h4>Unmatched Columns in This File</h4>
+                <p className="hint-text">
+                  These columns aren't mapped to any field above. They'll still be saved under their column name either
+                  way — or turn one straight into a proper field with its own name, reusable in future imports and
+                  reports.
+                </p>
+                <div className="checkbox-grid">
+                  {unmatchedColumns.map((h) => (
+                    <div key={h} className="actions-cell">
+                      <span>{h}</span>
+                      <button type="button" className="btn-link" onClick={() => makeColumnAField(h)} disabled={addingField}>
+                        + Make this a field
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="grid-2">
             {allFields.map((f) => {
               const sel = selection[f.key] || "";
@@ -427,6 +505,37 @@ export default function ImportStudents() {
             </button>
           </div>
           {addFieldError && <p className="error-text">{addFieldError}</p>}
+
+          {(() => {
+            const unusedDisplayFields = builtinFields.filter(
+              (f) => DISPLAYABLE_TABLE_FIELDS.has(f.key) && !selection[f.key]
+            );
+            if (unusedDisplayFields.length === 0) return null;
+            return (
+              <div className="section-heading">
+                <h4>Fields Not in This Import</h4>
+                <p className="hint-text">
+                  This is a school-wide display setting, not just for this import — hiding one of these removes its
+                  column from Student Records for every student, including any who already have this data.
+                </p>
+                <div className="checkbox-grid">
+                  {unusedDisplayFields.map((f) => {
+                    const checked = hideOverrides[f.key] ?? hiddenFieldsInitial.includes(f.key);
+                    return (
+                      <label key={f.key} className="checkbox-item">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => setHideOverrides((h) => ({ ...h, [f.key]: e.target.checked }))}
+                        />
+                        Hide "{f.label}" from Student Records
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <p className="hint-text">
             Any file column not matched to a field above will still be saved and shown on the student's record under

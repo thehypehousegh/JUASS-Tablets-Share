@@ -49,6 +49,7 @@ export default function Students() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<StudentRow | null>(null);
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
+  const [hiddenFields, setHiddenFields] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
@@ -76,8 +77,14 @@ export default function Students() {
     load();
     loadFilterOptions();
     apiGet("/custom-fields").then(setCustomFields).catch(() => setCustomFields([]));
+    apiGet("/settings/hidden-fields").then((r) => setHiddenFields(r.hiddenFields)).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const showGender = !hiddenFields.includes("gender");
+  const showClass = !hiddenFields.includes("className");
+  const showYear = !hiddenFields.includes("admissionYear");
+  const columnCount = 3 + [showGender, showClass, showYear].filter(Boolean).length + (isAdmin ? 1 : 0);
 
   return (
     <div className="page">
@@ -123,9 +130,9 @@ export default function Students() {
               <tr>
                 <th>Index No.</th>
                 <th>Name</th>
-                <th>Gender</th>
-                <th>Class</th>
-                <th>Year Group</th>
+                {showGender && <th>Gender</th>}
+                {showClass && <th>Class</th>}
+                {showYear && <th>Year Group</th>}
                 <th>Device Status</th>
                 {isAdmin && <th>Actions</th>}
               </tr>
@@ -135,9 +142,9 @@ export default function Students() {
                 <tr key={s.indexNumber}>
                   <td>{s.indexNumber}</td>
                   <td>{s.fullName}</td>
-                  <td>{s.gender || "—"}</td>
-                  <td>{s.className || "—"}</td>
-                  <td>{s.admissionYear || "—"}</td>
+                  {showGender && <td>{s.gender || "—"}</td>}
+                  {showClass && <td>{s.className || "—"}</td>}
+                  {showYear && <td>{s.admissionYear || "—"}</td>}
                   <td>{s.assignments.length > 0 ? "Has a device" : "Not yet received"}</td>
                   {isAdmin && (
                     <td>
@@ -150,7 +157,7 @@ export default function Students() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6}>No students found.</td>
+                  <td colSpan={columnCount}>No students found.</td>
                 </tr>
               )}
             </tbody>

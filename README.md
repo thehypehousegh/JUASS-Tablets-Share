@@ -279,7 +279,21 @@ weren't in the admission data — a distributor or admin fills them in as
 students are processed), and as a selectable, renamable column in Reports.
 Import mapping also supports setting one fixed value for every row in a
 batch instead of reading a column — useful for a field like Year Group that
-is the same for the whole import but isn't a column in the file.
+is the same for the whole import but isn't a column in the file. A file
+with no header row at all is handled too ("This file has no column
+headings" checkbox on the row-picker step) — generic placeholder names are
+assigned and can be renamed on the "Name Your Columns" step before
+matching, same as a real header row's names can be. And on the Match
+Columns step, any file column not mapped to anything can be turned
+straight into a custom field with its own name via "+ Make this a field",
+rather than typing a new field name from scratch.
+
+If a built-in field (Gender, Class, Year Group) isn't in a given import at
+all, the "Fields Not in This Import" section lets an Admin hide its column
+from the Student Records table — a school-wide display setting (`Setting`
+key `hiddenStudentFields`), not something scoped to just that import batch.
+A field that gets real data in a later import automatically comes back
+into view.
 
 ## Security notes
 
@@ -301,6 +315,12 @@ is the same for the whole import but isn't a column in the file.
   shows exact counts of what will be removed — including cascaded device
   assignments and issue reports — before anything happens, and requires
   typing "DELETE" to confirm.
+- Super Admin can fully reset the system (Settings & Backup → Danger Zone)
+  — deletes every student, device assignment, issue report, chat message,
+  and custom field definition. User accounts are left untouched, so nobody
+  is locked out afterward. Requires re-entering the acting admin's own
+  password (not just being logged in) plus typing "DELETE ALL" exactly.
+  This is irreversible short of restoring a downloaded backup.
 - `npm audit` is clean for both `server` and `client` as of this build. One
   moderate, non-exploitable-in-this-app transitive advisory remains from
   `exceljs`'s `uuid` dependency (a buffer-bounds issue only reachable if a
