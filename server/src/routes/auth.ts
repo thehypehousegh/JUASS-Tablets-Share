@@ -1,9 +1,10 @@
+import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { comparePassword } from "../utils/password";
-import { clearSession, issueSession, requireAuth } from "../middleware/auth";
+import { clearSession, issueSession, readSessionCookie, requireAuth } from "../middleware/auth";
 import { getSyncStatus, runSyncNow } from "../sync";
 
 const router = Router();
@@ -60,11 +61,15 @@ router.post(
       return res.status(401).json({ error: `Incorrect password. ${MAX_FAILED_ATTEMPTS - attempts} attempt(s) left.` });
     }
 
+    // A fresh session id here — and only here — is what makes logging in
+    // on a second device automatically log the first one out: the old
+    // cookie still carries the previous id, which no longer matches.
+    const sessionId = crypto.randomUUID();
     await prisma.user.update({
       where: { id: user.id },
-      data: { failedLoginAttempts: 0, lockedUntil: null },
+      data: { failedLoginAttempts: 0, lockedUntil: null, activeSessionId: sessionId },
     });
-    issueSession(res, { userId: user.id, role: user.role });
+    issueSession(res, { userId: user.id, role: user.role, sessionId });
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
   })
 );
@@ -73,8 +78,18 @@ const LOGOUT_SYNC_TIMEOUT_MS = 8_000;
 
 router.post(
   "/logout",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     clearSession(res);
+
+    // Best-effort: if this cookie is still the account's currently active
+    // session, clear it server-side too, so it can't be replayed after an
+    // explicit logout. Never blocks logout if the cookie's already stale.
+    const decoded = readSessionCookie(req);
+    if (decoded) {
+      await prisma.user
+        .updateMany({ where: { id: decoded.userId, activeSessionId: decoded.sessionId }, data: { activeSessionId: null } })
+        .catch(() => undefined);
+    }
 
     // Push whatever this session worked on as soon as they log out, rather
     // than waiting for the next scheduled sync tick — and tell them whether

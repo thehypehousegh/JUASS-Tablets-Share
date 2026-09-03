@@ -51,6 +51,10 @@ model User {
   failedLoginAttempts    Int       @default(0)
   lockedUntil            DateTime?
   passwordResetRequested Boolean   @default(false)
+  // Identifies this account's one currently-valid login session. Logging in
+  // again (any device/browser) overwrites this, which immediately
+  // invalidates the previous session's cookie on its next request.
+  activeSessionId        String?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 

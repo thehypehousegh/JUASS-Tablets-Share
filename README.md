@@ -274,6 +274,12 @@ lets you match each of the real file's columns to a field, or leave it as an
 - Login is by selecting your name from a dropdown (populated from active
   accounts) plus your password; 5 failed attempts blocks the account until
   an Admin unlocks it from Manage Users.
+- Only one login is valid per account at a time. Logging in on a second
+  device/browser immediately invalidates the first one's session — the
+  older session finds out within ~25 seconds and is shown a clear reason
+  ("logged in elsewhere") rather than just starting to fail silently.
+  Verified against the real login/logout endpoints, including that an
+  explicit logout also invalidates its own cookie server-side.
 - Faulty/missing reports need Admin approval before they count anywhere.
 - Only Super Admin can edit a student's record (from Student Records, or
   inline while assigning a device) or bulk-delete students by year group

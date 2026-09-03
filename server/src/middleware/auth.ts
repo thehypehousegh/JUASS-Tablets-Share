@@ -10,6 +10,7 @@ const TOKEN_TTL = "12h";
 export interface AuthPayload {
   userId: string;
   role: Role;
+  sessionId: string;
 }
 
 declare global {
@@ -35,6 +36,16 @@ export function clearSession(res: Response) {
   res.clearCookie(COOKIE_NAME);
 }
 
+export function readSessionCookie(req: Request): AuthPayload | null {
+  try {
+    const token = req.cookies?.[COOKIE_NAME];
+    if (!token) return null;
+    return jwt.verify(token, JWT_SECRET) as AuthPayload;
+  } catch {
+    return null;
+  }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const token = req.cookies?.[COOKIE_NAME];
@@ -42,6 +53,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
     const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
     if (!user || !user.active) return res.status(401).json({ error: "Session invalid" });
+    // Only one login is valid per account at a time — a newer login (any
+    // device/browser) overwrites activeSessionId, which immediately
+    // invalidates every other still-open session for that account.
+    if (!decoded.sessionId || decoded.sessionId !== user.activeSessionId) {
+      return res.status(401).json({
+        error: "This account was just used to log in elsewhere, so you've been logged out here.",
+        code: "SESSION_SUPERSEDED",
+      });
+    }
     req.user = { id: user.id, role: user.role, name: user.name, email: user.email };
     next();
   } catch {

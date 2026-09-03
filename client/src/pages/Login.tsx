@@ -10,7 +10,7 @@ interface LoginOption {
 }
 
 export default function Login() {
-  const { user, login } = useAuth();
+  const { user, login, sessionNotice, clearSessionNotice } = useAuth();
   const navigate = useNavigate();
   const [options, setOptions] = useState<LoginOption[]>([]);
   const [userId, setUserId] = useState("");
@@ -76,6 +76,15 @@ export default function Login() {
           <h1>JUASS Tablets Share</h1>
           <p className="subtitle">Juaben Senior High School — Tablet Distribution System</p>
         </div>
+
+        {sessionNotice && (
+          <p className="warn-text">
+            {sessionNotice}{" "}
+            <button type="button" className="btn-link" onClick={clearSessionNotice}>
+              Dismiss
+            </button>
+          </p>
+        )}
 
         <div className="field">
           <label>Your Name</label>
