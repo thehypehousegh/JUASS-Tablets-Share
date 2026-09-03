@@ -12,12 +12,23 @@ interface ParsedResult {
   rowCount: number;
   rows: Record<string, unknown>[];
   sheet?: string;
+  headerRow?: number;
+  dataStartRow?: number;
 }
 
 interface SheetSelectionResult {
   needsSheetSelection: true;
   sheets: string[];
 }
+
+interface HeaderSelectionResult {
+  needsHeaderSelection: true;
+  sheet?: string;
+  rowCount: number;
+  preview: string[][];
+}
+
+type ParseResponse = ParsedResult | SheetSelectionResult | HeaderSelectionResult;
 
 export default function ImportStudents() {
   const [fields, setFields] = useState<FieldDef[]>([]);
@@ -27,8 +38,13 @@ export default function ImportStudents() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ created: number; updated: number; errors: string[] } | null>(null);
+
   const [sheetOptions, setSheetOptions] = useState<string[] | null>(null);
   const [selectedSheet, setSelectedSheet] = useState("");
+
+  const [headerPreview, setHeaderPreview] = useState<HeaderSelectionResult | null>(null);
+  const [headerRow, setHeaderRow] = useState(1);
+  const [dataStartRow, setDataStartRow] = useState(2);
 
   useEffect(() => {
     apiGet("/students/fields").then(setFields).catch(() => setFields([]));
@@ -37,6 +53,7 @@ export default function ImportStudents() {
   function applyParsed(data: ParsedResult) {
     setParsed(data);
     setSheetOptions(null);
+    setHeaderPreview(null);
     // Best-effort auto-match by similar header/field names.
     const auto: Record<string, string> = {};
     for (const f of fields) {
@@ -46,7 +63,7 @@ export default function ImportStudents() {
     setMapping(auto);
   }
 
-  async function parseFile(sheet?: string) {
+  async function parseFile(opts: { sheet?: string; headerRow?: number; dataStartRow?: number } = {}) {
     if (!file) return;
     setError(null);
     setResult(null);
@@ -54,11 +71,20 @@ export default function ImportStudents() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      if (sheet) formData.append("sheet", sheet);
-      const data: ParsedResult | SheetSelectionResult = await apiUpload("POST", "/students/import/parse", formData);
+      if (opts.sheet) formData.append("sheet", opts.sheet);
+      if (opts.headerRow) formData.append("headerRow", String(opts.headerRow));
+      if (opts.dataStartRow) formData.append("dataStartRow", String(opts.dataStartRow));
+      const data: ParseResponse = await apiUpload("POST", "/students/import/parse", formData);
       if ("needsSheetSelection" in data) {
         setSheetOptions(data.sheets);
         setSelectedSheet(data.sheets[0] || "");
+        setHeaderPreview(null);
+        setParsed(null);
+      } else if ("needsHeaderSelection" in data) {
+        setHeaderPreview(data);
+        setHeaderRow(1);
+        setDataStartRow(2);
+        setSheetOptions(null);
         setParsed(null);
       } else {
         applyParsed(data);
@@ -73,6 +99,7 @@ export default function ImportStudents() {
   async function handleParse(e: React.FormEvent) {
     e.preventDefault();
     setSheetOptions(null);
+    setHeaderPreview(null);
     await parseFile();
   }
 
@@ -122,8 +149,77 @@ export default function ImportStudents() {
               ))}
             </select>
           </div>
-          <button className="btn-primary" onClick={() => parseFile(selectedSheet)} disabled={busy}>
+          <button className="btn-primary" onClick={() => parseFile({ sheet: selectedSheet })} disabled={busy}>
             {busy ? "Reading…" : "Use This Sheet"}
+          </button>
+        </div>
+      )}
+
+      {headerPreview && (
+        <div className="card">
+          <h3>Which row has the column headings?</h3>
+          <p className="hint-text">
+            Not every file has its headings on row 1 — some have a title or note above the real table. Look at the rows
+            below and tell us which row has the column names, and which row the actual student data starts on.
+          </p>
+          <div className="grid-2">
+            <div className="field">
+              <label>Heading row</label>
+              <input
+                type="number"
+                min={1}
+                max={headerPreview.rowCount}
+                value={headerRow}
+                onChange={(e) => {
+                  const v = Number(e.target.value) || 1;
+                  setHeaderRow(v);
+                  setDataStartRow(v + 1);
+                }}
+              />
+            </div>
+            <div className="field">
+              <label>Data starts at row</label>
+              <input
+                type="number"
+                min={1}
+                max={headerPreview.rowCount}
+                value={dataStartRow}
+                onChange={(e) => setDataStartRow(Number(e.target.value) || 1)}
+              />
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {headerPreview.preview.map((row, i) => {
+                  const rowNum = i + 1;
+                  const isHeader = rowNum === headerRow;
+                  const isDataStart = rowNum === dataStartRow;
+                  return (
+                    <tr
+                      key={rowNum}
+                      className={isHeader ? "badge-active" : isDataStart ? "badge-warn" : undefined}
+                    >
+                      <td>
+                        <strong>{rowNum}</strong>
+                        {isHeader && " (heading)"}
+                        {isDataStart && " (data starts)"}
+                      </td>
+                      {row.map((cell, ci) => (
+                        <td key={ci}>{cell || "—"}</td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button
+            className="btn-primary"
+            onClick={() => parseFile({ sheet: selectedSheet, headerRow, dataStartRow })}
+            disabled={busy}
+          >
+            {busy ? "Reading…" : "Use These Rows"}
           </button>
         </div>
       )}
@@ -131,7 +227,8 @@ export default function ImportStudents() {
       {parsed && (
         <div className="card">
           <h3>
-            Match Columns ({parsed.rowCount} rows found{parsed.sheet ? ` on sheet "${parsed.sheet}"` : ""})
+            Match Columns ({parsed.rowCount} rows found{parsed.sheet ? ` on sheet "${parsed.sheet}"` : ""}
+            {parsed.headerRow ? `, heading row ${parsed.headerRow}` : ""})
           </h3>
           <div className="grid-2">
             {fields.map((f) => (

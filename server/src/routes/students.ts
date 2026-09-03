@@ -202,6 +202,14 @@ router.patch(
 );
 
 // --- Import: step 1, parse the uploaded file and return headers + rows ---
+//
+// Real admission-data files routinely don't have their column headings on
+// row 1 — a title banner, a submission-deadline note, an instructions line,
+// etc. often sit above the real header row. So this doesn't assume row 1:
+// it first reduces the file (whichever sheet, xlsx or csv) to a plain grid
+// of rows, and if the caller hasn't said which row is the header yet, it
+// hands back a preview of that grid for them to look at and choose from —
+// same idea as the sheet picker, one step further in.
 router.post(
   "/import/parse",
   requireRole("SUPER_ADMIN"),
@@ -210,24 +218,25 @@ router.post(
     if (!req.file) return res.status(400).json({ error: "Upload a .xlsx or .csv file" });
     const isCsv = /\.csv$/i.test(req.file.originalname) || req.file.mimetype === "text/csv";
 
-    let rows: Record<string, unknown>[] = [];
+    let grid: string[][] = [];
     let sheetName: string | undefined;
 
     if (isCsv) {
-      const records: Record<string, string>[] = parseCsv(req.file.buffer, {
-        columns: true,
-        skip_empty_lines: true,
+      const records: string[][] = parseCsv(req.file.buffer, {
+        columns: false,
+        skip_empty_lines: false,
         trim: true,
         bom: true,
+        relax_column_count: true,
       });
-      rows = records;
+      grid = records.map((row) => row.map((cell) => String(cell ?? "")));
     } else {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(req.file.buffer as unknown as ArrayBuffer);
       const sheetNames = workbook.worksheets.map((w) => w.name);
 
       const requestedSheet = req.body.sheet ? String(req.body.sheet) : undefined;
-      let sheet = requestedSheet ? workbook.getWorksheet(requestedSheet) : workbook.worksheets[0];
+      const sheet = requestedSheet ? workbook.getWorksheet(requestedSheet) : workbook.worksheets[0];
 
       // More than one sheet and the caller hasn't said which one yet — ask,
       // rather than silently importing whatever happens to be first.
@@ -235,26 +244,61 @@ router.post(
         return res.json({ needsSheetSelection: true, sheets: sheetNames });
       }
       if (!sheet) return res.status(400).json({ error: `Sheet "${requestedSheet}" was not found in this file` });
-
       sheetName = sheet.name;
-      const headerRow = sheet.getRow(1).values as unknown[];
-      const headers = headerRow.slice(1).map((h) => String(h ?? "").trim());
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const values = row.values as unknown[];
-        const record: Record<string, unknown> = {};
-        headers.forEach((header, idx) => {
-          if (!header) return;
-          const cell = values[idx + 1];
-          record[header] = cell instanceof Date ? cell : cell === undefined || cell === null ? "" : String(cell);
-        });
-        rows.push(record);
+
+      let maxCol = sheet.columnCount || 0;
+      sheet.eachRow((row) => {
+        if (row.cellCount > maxCol) maxCol = row.cellCount;
       });
+
+      for (let r = 1; r <= sheet.rowCount; r++) {
+        const values = sheet.getRow(r).values as unknown[];
+        const rowArr: string[] = [];
+        for (let c = 1; c <= maxCol; c++) {
+          const cell = values[c];
+          rowArr.push(cell instanceof Date ? cell.toISOString() : cell === undefined || cell === null ? "" : String(cell).trim());
+        }
+        grid.push(rowArr);
+      }
     }
 
-    if (rows.length === 0) return res.status(400).json({ error: "The file appears to be empty" });
-    const headers = Object.keys(rows[0]);
-    res.json({ headers, rowCount: rows.length, rows: rows.slice(0, 2000), sheet: sheetName });
+    if (grid.length === 0) return res.status(400).json({ error: "The file appears to be empty" });
+
+    const headerRow = req.body.headerRow ? parseInt(String(req.body.headerRow), 10) : undefined;
+    if (!headerRow) {
+      return res.json({
+        needsHeaderSelection: true,
+        sheet: sheetName,
+        rowCount: grid.length,
+        preview: grid.slice(0, 20),
+      });
+    }
+    if (headerRow < 1 || headerRow > grid.length) {
+      return res.status(400).json({ error: `Row ${headerRow} doesn't exist in this sheet` });
+    }
+
+    const dataStartRow = req.body.dataStartRow ? parseInt(String(req.body.dataStartRow), 10) : headerRow + 1;
+    const headers = grid[headerRow - 1].map((h) => h.trim());
+    if (headers.every((h) => !h)) {
+      return res.status(400).json({ error: `Row ${headerRow} doesn't look like a header row — every cell is blank` });
+    }
+
+    const rows: Record<string, unknown>[] = [];
+    for (let i = Math.max(dataStartRow - 1, 0); i < grid.length; i++) {
+      const rowArr = grid[i];
+      if (rowArr.every((c) => !c.trim())) continue; // skip blank rows rather than importing empty students
+      const record: Record<string, unknown> = {};
+      headers.forEach((header, idx) => {
+        if (!header) return;
+        record[header] = rowArr[idx] ?? "";
+      });
+      rows.push(record);
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: `No data found starting at row ${dataStartRow} — check the row numbers` });
+    }
+    res.json({ headers, rowCount: rows.length, rows: rows.slice(0, 2000), sheet: sheetName, headerRow, dataStartRow });
   })
 );
 
