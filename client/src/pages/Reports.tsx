@@ -16,6 +16,7 @@ interface TypesResponse {
   fields: FieldDef[];
   defaultFields: Record<string, string[]>;
   defaultTitles: Record<string, string>;
+  alertCounts: Record<string, number>;
 }
 
 interface DataResponse {
@@ -132,16 +133,17 @@ export default function Reports() {
       <div className="card">
         <h3>1. Report</h3>
         <div className="filter-row">
-          {meta.types.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className={type === t.key ? "btn-primary" : "btn-secondary"}
-              onClick={() => changeType(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
+          {meta.types.map((t) => {
+            const alertCount = meta.alertCounts[t.key] || 0;
+            const className =
+              type === t.key ? "btn-primary" : alertCount > 0 ? "btn-danger" : "btn-secondary";
+            return (
+              <button key={t.key} type="button" className={className} onClick={() => changeType(t.key)}>
+                {t.label}
+                {alertCount > 0 ? ` (${alertCount})` : ""}
+              </button>
+            );
+          })}
         </div>
       </div>
 

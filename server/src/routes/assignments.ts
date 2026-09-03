@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { computeFormStatus } from "../utils/academicYear";
 
 const router = Router();
 router.use(requireAuth);
@@ -26,6 +27,12 @@ router.post(
 
     const student = await prisma.student.findUnique({ where: { indexNumber: studentIndexNumber } });
     if (!student) return res.status(404).json({ error: "No student found with this index number" });
+
+    if (computeFormStatus(student.admissionYear) === "COMPLETED") {
+      return res.status(409).json({
+        error: `${student.fullName} has completed the 3-year program (Year Group ${student.admissionYear}) and should not be assigned a new device.`,
+      });
+    }
 
     const existingActive = await prisma.deviceAssignment.findFirst({
       where: { studentId: student.id, status: "WITH_STUDENT" },
@@ -54,6 +61,12 @@ router.post(
   })
 );
 
+// One row per student — their single most recent device assignment —
+// rather than every historical row. A student who's had a device
+// replaced or returned and reassigned otherwise showed up 2-3 times here
+// with no obvious way to tell which row was current; the full history
+// (previous devices, replace/return reasons, linked issue reports) is one
+// click away via GET /history/:studentId instead.
 router.get(
   "/",
   asyncHandler(async (req, res) => {
@@ -62,9 +75,8 @@ router.get(
     const className = req.query.className ? String(req.query.className) : undefined;
     const year = req.query.year ? String(req.query.year) : undefined;
 
-    const assignments = await prisma.deviceAssignment.findMany({
+    const latestPerStudent = await prisma.deviceAssignment.findMany({
       where: {
-        status: status ? (status as "WITH_STUDENT" | "REPLACED" | "RETURNED") : undefined,
         student: {
           className: className || undefined,
           admissionYear: year || undefined,
@@ -77,10 +89,38 @@ router.get(
         },
       },
       include: { student: true, distributor: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 500,
+      distinct: ["studentId"],
+      orderBy: [{ studentId: "asc" }, { createdAt: "desc" }],
+      take: 2000,
     });
-    res.json(assignments);
+
+    const filtered = status ? latestPerStudent.filter((a) => a.status === status) : latestPerStudent;
+    filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    res.json(filtered.slice(0, 500));
+  })
+);
+
+// Full assignment history for one student — every device they've ever had,
+// oldest first, plus any faulty/missing reports tied to those devices.
+router.get(
+  "/history/:studentId",
+  asyncHandler(async (req, res) => {
+    const student = await prisma.student.findUnique({ where: { id: req.params.studentId } });
+    if (!student) return res.status(404).json({ error: "Student not found" });
+
+    const assignments = await prisma.deviceAssignment.findMany({
+      where: { studentId: student.id },
+      include: {
+        distributor: { select: { name: true } },
+        issueReports: {
+          include: { reportedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    res.json({ student, assignments });
   })
 );
 
@@ -96,30 +136,56 @@ router.get(
   })
 );
 
-const returnSchema = z.object({ returnedDate: z.string().optional() });
+const returnSchema = z
+  .object({
+    returnedDate: z.string().optional(),
+    reason: z.enum(["COMPLETED", "WITHDRAWN", "OTHER"]),
+    note: z.string().trim().optional(),
+  })
+  .refine((d) => d.reason !== "OTHER" || !!d.note?.trim(), {
+    message: 'A short note is required when reason is "Other"',
+    path: ["note"],
+  });
 
 router.post(
   "/:id/return",
   requireRole("SUPER_ADMIN", "DISTRIBUTOR"),
   asyncHandler(async (req, res) => {
     const parsed = returnSchema.safeParse(req.body);
-    const returnedDate = parsed.success && parsed.data.returnedDate ? new Date(parsed.data.returnedDate) : new Date();
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Select a reason for the return" });
+    const returnedDate = parsed.data.returnedDate ? new Date(parsed.data.returnedDate) : new Date();
     const assignment = await prisma.deviceAssignment
-      .update({ where: { id: req.params.id }, data: { status: "RETURNED", returnedDate } })
+      .update({
+        where: { id: req.params.id },
+        data: {
+          status: "RETURNED",
+          returnedDate,
+          returnReason: parsed.data.reason,
+          returnNote: parsed.data.note?.trim() || null,
+        },
+      })
       .catch(() => null);
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
     res.json(assignment);
   })
 );
 
-const replaceSchema = z.object({
-  imei: z.string().min(5),
-  serialNumber: z.string().min(3),
-  embossmentNumber: z.string().optional(),
-});
+const replaceSchema = z
+  .object({
+    imei: z.string().min(5),
+    serialNumber: z.string().min(3),
+    embossmentNumber: z.string().optional(),
+    reason: z.enum(["FAULTY", "MISSING", "OTHER"]),
+    note: z.string().trim().optional(),
+  })
+  .refine((d) => d.reason !== "OTHER" || !!d.note?.trim(), {
+    message: 'A short note is required when reason is "Other"',
+    path: ["note"],
+  });
 
-// Replaces a device: closes the old assignment (status REPLACED, replacementDate = now)
-// and opens a fresh active assignment for the same student with the new device.
+// Replaces a device: closes the old assignment (status REPLACED, replacementDate = now,
+// with a reason recorded on it) and opens a fresh active assignment for the same
+// student with the new device.
 router.post(
   "/:id/replace",
   requireRole("SUPER_ADMIN", "DISTRIBUTOR"),
@@ -133,7 +199,12 @@ router.post(
     const [, fresh] = await prisma.$transaction([
       prisma.deviceAssignment.update({
         where: { id: old.id },
-        data: { status: "REPLACED", replacementDate: new Date() },
+        data: {
+          status: "REPLACED",
+          replacementDate: new Date(),
+          replacementReason: parsed.data.reason,
+          replacementNote: parsed.data.note?.trim() || null,
+        },
       }),
       prisma.deviceAssignment.create({
         data: {
@@ -187,6 +258,10 @@ router.get(
       { header: "Returned Date", key: "returnedDate", width: 16 },
       { header: "Status", key: "status", width: 16 },
       { header: "Embossment Number", key: "embossmentNumber", width: 20 },
+      { header: "Replacement Reason", key: "replacementReason", width: 18 },
+      { header: "Replacement Note", key: "replacementNote", width: 26 },
+      { header: "Return Reason", key: "returnReason", width: 16 },
+      { header: "Return Note", key: "returnNote", width: 26 },
     ];
     sheet.getRow(1).font = { bold: true };
 
@@ -209,6 +284,10 @@ router.get(
         returnedDate: a.returnedDate ? a.returnedDate.toISOString().slice(0, 10) : "",
         status: a.status,
         embossmentNumber: a.embossmentNumber ?? "",
+        replacementReason: a.replacementReason ?? "",
+        replacementNote: a.replacementNote ?? "",
+        returnReason: a.returnReason ?? "",
+        returnNote: a.returnNote ?? "",
       });
     }
 

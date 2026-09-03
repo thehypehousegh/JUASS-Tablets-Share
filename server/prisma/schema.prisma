@@ -29,6 +29,18 @@ enum AssignmentStatus {
   RETURNED
 }
 
+enum ReplacementReason {
+  FAULTY
+  MISSING
+  OTHER
+}
+
+enum ReturnReason {
+  COMPLETED
+  WITHDRAWN
+  OTHER
+}
+
 enum IssueType {
   FAULTY
   MISSING
@@ -97,6 +109,14 @@ model DeviceAssignment {
   replacementDate   DateTime?
   returnedDate      DateTime?
   status            AssignmentStatus  @default(WITH_STUDENT)
+  // Set on THIS record when it's the one being closed out — e.g. the old
+  // device in a replace, or the device being marked returned. Kept on the
+  // row they describe (not the new replacement device) so a student's
+  // history reads as "this device left because X", per record.
+  replacementReason ReplacementReason?
+  replacementNote   String?
+  returnReason      ReturnReason?
+  returnNote        String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

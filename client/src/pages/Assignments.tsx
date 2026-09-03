@@ -11,10 +11,31 @@ interface Assignment {
   dateAssigned: string;
   replacementDate: string | null;
   returnedDate: string | null;
+  replacementReason: "FAULTY" | "MISSING" | "OTHER" | null;
+  replacementNote: string | null;
+  returnReason: "COMPLETED" | "WITHDRAWN" | "OTHER" | null;
+  returnNote: string | null;
   status: "WITH_STUDENT" | "REPLACED" | "RETURNED";
-  student: { indexNumber: string; fullName: string; className: string | null; admissionYear: string | null };
+  student: { id: string; indexNumber: string; fullName: string; className: string | null; admissionYear: string | null };
   distributor: { name: string };
 }
+
+interface IssueReport {
+  id: string;
+  type: "FAULTY" | "MISSING";
+  description: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  createdAt: string;
+  reportedBy: { name: string };
+  reviewedBy: { name: string } | null;
+}
+
+interface HistoryAssignment extends Assignment {
+  issueReports: IssueReport[];
+}
+
+const REPLACEMENT_REASON_LABELS: Record<string, string> = { FAULTY: "Faulty", MISSING: "Missing", OTHER: "Other" };
+const RETURN_REASON_LABELS: Record<string, string> = { COMPLETED: "Completed", WITHDRAWN: "Withdrawn", OTHER: "Other" };
 
 export default function Assignments() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -26,6 +47,8 @@ export default function Assignments() {
   const [yearOptions, setYearOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [replacing, setReplacing] = useState<Assignment | null>(null);
+  const [returning, setReturning] = useState<Assignment | null>(null);
+  const [historyFor, setHistoryFor] = useState<Assignment | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function buildParams() {
@@ -56,19 +79,10 @@ export default function Assignments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function markReturned(a: Assignment) {
-    if (!confirm(`Mark ${a.student.fullName}'s device as returned?`)) return;
-    try {
-      await apiSend("POST", `/assignments/${a.id}/return`, {});
-      load();
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Could not update assignment");
-    }
-  }
-
   return (
     <div className="page">
       <h2>Device Assignments</h2>
+      <p className="hint-text">Each student appears once, showing their current device status — use "History" to see every device they've had.</p>
 
       <div className="card filter-row">
         <input
@@ -153,11 +167,14 @@ export default function Assignments() {
                         <button className="btn-link" onClick={() => setReplacing(a)}>
                           Replace
                         </button>
-                        <button className="btn-link" onClick={() => markReturned(a)}>
+                        <button className="btn-link" onClick={() => setReturning(a)}>
                           Mark Returned
                         </button>
                       </>
                     )}
+                    <button className="btn-link" onClick={() => setHistoryFor(a)}>
+                      History
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -181,6 +198,19 @@ export default function Assignments() {
           }}
         />
       )}
+
+      {returning && (
+        <ReturnModal
+          assignment={returning}
+          onClose={() => setReturning(null)}
+          onDone={() => {
+            setReturning(null);
+            load();
+          }}
+        />
+      )}
+
+      {historyFor && <HistoryModal assignment={historyFor} onClose={() => setHistoryFor(null)} />}
     </div>
   );
 }
@@ -189,6 +219,8 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
   const [imei, setImei] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [embossmentNumber, setEmbossmentNumber] = useState("");
+  const [reason, setReason] = useState("FAULTY");
+  const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -199,12 +231,18 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
       setError("Enter the new device's IMEI and Serial Number");
       return;
     }
+    if (reason === "OTHER" && !note.trim()) {
+      setError('Enter a short note explaining "Other"');
+      return;
+    }
     setSubmitting(true);
     try {
       await apiSend("POST", `/assignments/${assignment.id}/replace`, {
         imei: imei.trim(),
         serialNumber: serialNumber.trim(),
         embossmentNumber: embossmentNumber.trim() || undefined,
+        reason,
+        note: note.trim() || undefined,
       });
       onDone();
     } catch (err) {
@@ -227,6 +265,25 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
           The old device ({assignment.serialNumber}) will be marked <strong>Replaced</strong> with today's date. Enter
           the replacement device below.
         </p>
+        <div className="field">
+          <label>Reason for Replacement</label>
+          <select value={reason} onChange={(e) => setReason(e.target.value)}>
+            <option value="FAULTY">Faulty</option>
+            <option value="MISSING">Missing</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>
+            Note{reason === "OTHER" ? " *" : " (optional)"}
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={reason === "OTHER" ? "Briefly explain why" : "Any extra detail"}
+          />
+        </div>
         <ScanInput label="New Device IMEI" value={imei} onChange={setImei} required />
         <ScanInput label="New Serial Number" value={serialNumber} onChange={setSerialNumber} required />
         <div className="field">
@@ -238,6 +295,142 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
           {submitting ? "Saving…" : "Confirm Replacement"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function ReturnModal({ assignment, onClose, onDone }: { assignment: Assignment; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("COMPLETED");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (reason === "OTHER" && !note.trim()) {
+      setError('Enter a short note explaining "Other"');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await apiSend("POST", `/assignments/${assignment.id}/return`, { reason, note: note.trim() || undefined });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not record the return");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-header">
+          <h3>Mark Returned — {assignment.student.fullName}</h3>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <p className="hint-text">
+          The device ({assignment.serialNumber}) will be marked <strong>Returned</strong> with today's date.
+        </p>
+        <div className="field">
+          <label>Reason for Return</label>
+          <select value={reason} onChange={(e) => setReason(e.target.value)}>
+            <option value="COMPLETED">Completed</option>
+            <option value="WITHDRAWN">Withdrawn</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>
+            Note{reason === "OTHER" ? " *" : " (optional)"}
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={reason === "OTHER" ? "Briefly explain why" : "Any extra detail"}
+          />
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Saving…" : "Confirm Return"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function HistoryModal({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
+  const [history, setHistory] = useState<HistoryAssignment[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet(`/assignments/history/${assignment.student.id}`)
+      .then((r) => setHistory(r.assignments))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load history"));
+  }, [assignment.student.id]);
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal" style={{ maxWidth: 640 }}>
+        <div className="modal-header">
+          <h3>Device History — {assignment.student.fullName}</h3>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        {!history && !error && <p>Loading…</p>}
+        {history && history.length === 0 && <p className="hint-text">No devices on record for this student.</p>}
+        {history && history.length > 0 && (
+          <div className="report-list">
+            {history.map((h, i) => (
+              <div key={h.id} className="card">
+                <div className="form-header">
+                  <strong>
+                    Device {i + 1}: {h.serialNumber} (IMEI {h.imei})
+                  </strong>
+                  <StatusBadge status={h.status} />
+                </div>
+                <p className="hint-text">
+                  Assigned {h.dateAssigned.slice(0, 10)} by {h.distributor.name}
+                  {h.embossmentNumber ? ` · Embossment ${h.embossmentNumber}` : ""}
+                </p>
+                {h.status === "REPLACED" && (
+                  <p className="warn-text">
+                    Replaced {h.replacementDate?.slice(0, 10)} — reason:{" "}
+                    {REPLACEMENT_REASON_LABELS[h.replacementReason || ""] || "Not recorded"}
+                    {h.replacementNote ? `: "${h.replacementNote}"` : ""}
+                  </p>
+                )}
+                {h.status === "RETURNED" && (
+                  <p className="success-text">
+                    Returned {h.returnedDate?.slice(0, 10)} — reason: {RETURN_REASON_LABELS[h.returnReason || ""] || "Not recorded"}
+                    {h.returnNote ? `: "${h.returnNote}"` : ""}
+                  </p>
+                )}
+                {h.issueReports.length > 0 && (
+                  <>
+                    <p className="hint-text">Issue reports on this device:</p>
+                    <ul className="student-list">
+                      {h.issueReports.map((r) => (
+                        <li key={r.id}>
+                          <strong>{r.type === "FAULTY" ? "Faulty" : "Missing"}</strong> ({r.status.toLowerCase()}) —{" "}
+                          {r.description} — reported by {r.reportedBy.name} on {r.createdAt.slice(0, 10)}
+                          {r.reviewedBy ? `, reviewed by ${r.reviewedBy.name}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

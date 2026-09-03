@@ -7,9 +7,18 @@ import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { uploadSpreadsheet } from "../middleware/upload";
+import { computeFormStatus, FORM_LABELS } from "../utils/academicYear";
 
 const router = Router();
 router.use(requireAuth);
+
+// Attaches the student's current Form (derived from Year Group, see
+// utils/academicYear.ts) to whatever's being returned, so the client never
+// has to duplicate — and risk drifting from — this computation.
+function withFormStatus<T extends { admissionYear: string | null }>(student: T) {
+  const formStatus = computeFormStatus(student.admissionYear);
+  return { ...student, formStatus, formLabel: FORM_LABELS[formStatus] };
+}
 
 export const STUDENT_FIELDS = [
   { key: "indexNumber", label: "Index Number", required: true },
@@ -55,7 +64,7 @@ router.get(
       take: 200,
       orderBy: [{ admissionYear: "desc" }, { className: "asc" }, { fullName: "asc" }],
     });
-    res.json(students);
+    res.json(students.map(withFormStatus));
   })
 );
 
@@ -157,7 +166,7 @@ router.get(
       include: { assignments: { orderBy: { createdAt: "desc" }, include: { distributor: { select: { name: true } } } } },
     });
     if (!student) return res.status(404).json({ error: "No student found with this index number" });
-    res.json(student);
+    res.json(withFormStatus(student));
   })
 );
 

@@ -295,6 +295,35 @@ key `hiddenStudentFields`), not something scoped to just that import batch.
 A field that gets real data in a later import automatically comes back
 into view.
 
+## Device lifecycle, Form, and graduation
+
+The Assignments page shows one row per student — their current device
+status — rather than every historical assignment row, which used to read
+as duplicate/repeated records for any student who'd had a device replaced
+or returned and reassigned. The full history (every device a student's
+had, in order, with why each one left) is one click away via the
+**History** button, which also surfaces any faulty/missing issue reports
+tied to each device.
+
+**Replace** and **Mark Returned** both require a reason before they can be
+confirmed — Replace: Faulty / Missing / Other; Return: Completed /
+Withdrawn / Other — plus an optional short note (required when "Other" is
+picked). Both are stored on the assignment row they close out, so the
+history view can show "replaced 2026-09-03 — reason: Faulty: 'screen
+cracked'" rather than just a bare status change.
+
+A student's current **Form** is derived from Year Group using Ghana's
+September-start academic year (`server/src/utils/academicYear.ts`), not a
+plain calendar-year subtraction: 0 full academic years since admission =
+Form 1, 1 = Form 2, 2 = Form 3, 3+ = **Completed**. A Completed student
+can't be assigned a new device — `POST /assignments` rejects it, and the
+Assign Device page shows the reason before the distributor gets as far as
+entering a device. The **Reports** page has a "Completed but Not Returned"
+report (students who've completed the program but still show a device as
+WITH_STUDENT and have no Missing report already flagging it) — its button
+renders in red only when that report actually has matching records,
+neutral otherwise.
+
 ## Security notes
 
 - Login is by selecting your name from a dropdown (populated from active

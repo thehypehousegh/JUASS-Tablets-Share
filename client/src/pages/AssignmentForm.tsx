@@ -19,6 +19,8 @@ interface StudentRecord {
   admissionYear: string | null;
   extraFields: Record<string, unknown> | null;
   assignments: { status: string; imei: string; serialNumber: string; dateAssigned: string; distributor: { name: string } }[];
+  formStatus: "FORM_1" | "FORM_2" | "FORM_3" | "COMPLETED" | "UNKNOWN";
+  formLabel: string;
 }
 
 interface CustomFieldDef {
@@ -32,6 +34,7 @@ interface SearchResult {
   fullName: string;
   className: string | null;
   admissionYear: string | null;
+  formLabel: string;
 }
 
 // Mirrors the server's INDEX_NUMBER_SYNONYMS (customFields.ts) — a custom
@@ -253,6 +256,8 @@ export default function AssignmentForm() {
   }
 
   const activeAssignment = student?.assignments.find((a) => a.status === "WITH_STUDENT");
+  const hasCompleted = student?.formStatus === "COMPLETED";
+  const blocked = !!activeAssignment || hasCompleted;
 
   return (
     <div className="page">
@@ -286,6 +291,7 @@ export default function AssignmentForm() {
                   <th>Name</th>
                   <th>Class</th>
                   <th>Year Group</th>
+                  <th>Form</th>
                   <th></th>
                 </tr>
               </thead>
@@ -296,6 +302,7 @@ export default function AssignmentForm() {
                     <td>{r.fullName}</td>
                     <td>{r.className || "—"}</td>
                     <td>{r.admissionYear || "—"}</td>
+                    <td className={r.formLabel === "Completed" ? "error-text" : undefined}>{r.formLabel}</td>
                     <td>
                       <button className="btn-link" onClick={() => loadStudent(r.indexNumber)} disabled={searching}>
                         Select
@@ -327,6 +334,14 @@ export default function AssignmentForm() {
             <p className="warn-text">
               This student already has an active device ({activeAssignment.serialNumber}). Use the Assignments page to
               record a replacement or return before assigning a new one here.
+            </p>
+          )}
+
+          {hasCompleted && (
+            <p className="error-text">
+              This student's Year Group ({student.admissionYear}) means they've completed the 3-year program and
+              should not be assigned a device. If this is an error, correct their Year Group from "Edit Details" or
+              Student Records.
             </p>
           )}
 
@@ -425,7 +440,7 @@ export default function AssignmentForm() {
             );
           })()}
 
-          <form onSubmit={handleSubmit} className={activeAssignment ? "disabled-form" : undefined}>
+          <form onSubmit={handleSubmit} className={blocked ? "disabled-form" : undefined}>
             <h4>Device Details (recorded at distribution)</h4>
             <div className="grid-2">
               <ScanInput label="Device IMEI" value={imei} onChange={setImei} required />
@@ -456,7 +471,7 @@ export default function AssignmentForm() {
             {formError && <p className="error-text">{formError}</p>}
             {message && <p className="success-text">{message}</p>}
 
-            <button type="submit" className="btn-primary" disabled={submitting || !!activeAssignment}>
+            <button type="submit" className="btn-primary" disabled={submitting || blocked}>
               {submitting ? "Saving…" : "Assign Device"}
             </button>
           </form>

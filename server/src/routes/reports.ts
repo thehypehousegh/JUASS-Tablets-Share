@@ -3,11 +3,19 @@ import ExcelJS from "exceljs";
 import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth } from "../middleware/auth";
+import { computeFormStatus, FORM_LABELS } from "../utils/academicYear";
 
 const router = Router();
 router.use(requireAuth);
 
-export type ReportType = "all_students" | "assigned" | "not_assigned" | "returned" | "faulty" | "missing";
+export type ReportType =
+  | "all_students"
+  | "assigned"
+  | "not_assigned"
+  | "returned"
+  | "faulty"
+  | "missing"
+  | "completed_not_returned";
 
 const REPORT_TYPES: { key: ReportType; label: string }[] = [
   { key: "all_students", label: "All Students" },
@@ -16,6 +24,7 @@ const REPORT_TYPES: { key: ReportType; label: string }[] = [
   { key: "returned", label: "Returned" },
   { key: "faulty", label: "Faulty" },
   { key: "missing", label: "Missing" },
+  { key: "completed_not_returned", label: "Completed but Not Returned" },
 ];
 
 interface FieldDef {
@@ -44,6 +53,7 @@ const ALL_FIELDS: FieldDef[] = [
   { key: "guardianName", label: "Guardian Name" },
   { key: "guardianContact", label: "Guardian Contact" },
   { key: "admissionYear", label: "Year Group (Batch)" },
+  { key: "formLabel", label: "Form" },
   { key: "assignmentStatus", label: "Assignment Status" },
   { key: "distributorName", label: "Distributor Name" },
   { key: "imei", label: "Device IMEI" },
@@ -71,6 +81,7 @@ const DEFAULT_TITLES: Record<ReportType, string> = {
   returned: "List of Returned Devices",
   faulty: "List of Reported Faulty Devices",
   missing: "List of Reported Missing Devices",
+  completed_not_returned: "Completed but Not Returned",
 };
 
 // Sensible starting selection per report type — the admin can still add or
@@ -94,6 +105,17 @@ const DEFAULT_FIELDS: Record<ReportType, string[]> = {
   returned: ["indexNumber", "fullName", "className", "admissionYear", "imei", "serialNumber", "dateAssigned", "returnedDate"],
   faulty: ["indexNumber", "fullName", "className", "imei", "serialNumber", "issueDescription", "issueStatus", "reportedByName", "reviewedByName"],
   missing: ["indexNumber", "fullName", "className", "imei", "serialNumber", "issueDescription", "issueStatus", "reportedByName", "reviewedByName"],
+  completed_not_returned: [
+    "indexNumber",
+    "fullName",
+    "className",
+    "admissionYear",
+    "formLabel",
+    "distributorName",
+    "imei",
+    "serialNumber",
+    "dateAssigned",
+  ],
 };
 
 async function loadFieldCatalog(): Promise<FieldDef[]> {
@@ -105,11 +127,15 @@ router.get(
   "/types",
   asyncHandler(async (_req, res) => {
     const fields = await loadFieldCatalog();
+    // Lets the Reports page flag a report as needing attention (e.g. a red
+    // button) before the admin has even opened it.
+    const completedNotReturned = await fetchRows(fields, "completed_not_returned", {});
     res.json({
       types: REPORT_TYPES,
       fields,
       defaultFields: DEFAULT_FIELDS,
       defaultTitles: DEFAULT_TITLES,
+      alertCounts: { completed_not_returned: completedNotReturned.length },
     });
   })
 );
@@ -151,6 +177,7 @@ function studentFields(s: {
     guardianName: s.guardianName ?? "",
     guardianContact: s.guardianContact ?? "",
     admissionYear: s.admissionYear ?? "",
+    formLabel: FORM_LABELS[computeFormStatus(s.admissionYear)],
   };
   for (const [key, value] of Object.entries(extra)) {
     row[`${CUSTOM_FIELD_PREFIX}${key}`] = value === null || value === undefined ? "" : String(value);
@@ -213,6 +240,39 @@ async function fetchRows(
       replacementDate: dateStr(a.replacementDate),
       returnedDate: dateStr(a.returnedDate),
     }));
+  }
+
+  if (type === "completed_not_returned") {
+    const students = await prisma.student.findMany({
+      where: {
+        className: className || undefined,
+        admissionYear: year || undefined,
+        OR: studentTextSearch,
+      },
+      include: {
+        assignments: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          include: { distributor: { select: { name: true } }, issueReports: true },
+        },
+      },
+      take: 10000,
+    });
+    return students
+      .filter((s) => computeFormStatus(s.admissionYear) === "COMPLETED")
+      .map((s) => ({ ...s, latest: s.assignments[0] }))
+      .filter((s) => s.latest?.status === "WITH_STUDENT")
+      .filter((s) => !s.latest!.issueReports.some((r) => r.type === "MISSING"))
+      .map((s) => ({
+        ...blankRow(catalog),
+        ...studentFields(s),
+        assignmentStatus: "With Student",
+        distributorName: s.latest!.distributor.name,
+        imei: s.latest!.imei,
+        serialNumber: s.latest!.serialNumber,
+        embossmentNumber: s.latest!.embossmentNumber ?? "",
+        dateAssigned: dateStr(s.latest!.dateAssigned),
+      }));
   }
 
   // faulty / missing
