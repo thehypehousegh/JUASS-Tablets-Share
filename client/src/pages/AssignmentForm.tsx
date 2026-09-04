@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import ScanInput from "../components/ScanInput";
 import StatusBadge from "../components/StatusBadge";
 import { isOnline, queueAssignment } from "../lib/offlineQueue";
+import { embossmentYearSuffix, previewEmbossmentNumber } from "../lib/embossment";
 
 interface StudentRecord {
   id: string;
@@ -93,7 +94,7 @@ export default function AssignmentForm() {
 
   const [imei, setImei] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
-  const [embossmentNumber, setEmbossmentNumber] = useState("");
+  const [embossmentDeviceNumber, setEmbossmentDeviceNumber] = useState("");
   const [dateAssigned, setDateAssigned] = useState(() => new Date().toISOString().slice(0, 10));
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -201,7 +202,7 @@ export default function AssignmentForm() {
   function resetDeviceFields() {
     setImei("");
     setSerialNumber("");
-    setEmbossmentNumber("");
+    setEmbossmentDeviceNumber("");
     setDateAssigned(new Date().toISOString().slice(0, 10));
   }
 
@@ -219,7 +220,7 @@ export default function AssignmentForm() {
       studentIndexNumber: student.indexNumber,
       imei: imei.trim(),
       serialNumber: serialNumber.trim(),
-      embossmentNumber: embossmentNumber.trim() || undefined,
+      embossmentDeviceNumber: embossmentDeviceNumber.trim() || undefined,
       dateAssigned,
     };
 
@@ -447,12 +448,27 @@ export default function AssignmentForm() {
               <ScanInput label="Serial Number" value={serialNumber} onChange={setSerialNumber} required />
               <div className="field">
                 <label>Embossment Number</label>
-                <input
-                  type="text"
-                  value={embossmentNumber}
-                  onChange={(e) => setEmbossmentNumber(e.target.value)}
-                  placeholder="Manually centered at distribution"
-                />
+                {embossmentYearSuffix(student.admissionYear) ? (
+                  <>
+                    <div className="input-prefix-group">
+                      <span className="input-prefix">JUASS/SM1/{embossmentYearSuffix(student.admissionYear)}/</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={embossmentDeviceNumber}
+                        onChange={(e) => setEmbossmentDeviceNumber(e.target.value.replace(/\D/g, ""))}
+                        placeholder="0001"
+                      />
+                    </div>
+                    {embossmentDeviceNumber.trim() && (
+                      <p className="hint-text">
+                        Will be recorded as {previewEmbossmentNumber(student.admissionYear, embossmentDeviceNumber)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="hint-text">Set this student's Year Group before entering an embossment number.</p>
+                )}
               </div>
               <div className="field">
                 <label>Date Assigned</label>

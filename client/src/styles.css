@@ -153,6 +153,30 @@ input:disabled {
   color: var(--muted);
 }
 
+.input-prefix-group {
+  display: flex;
+  align-items: stretch;
+}
+
+.input-prefix {
+  display: flex;
+  align-items: center;
+  padding: 9px 8px;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: #f0f2f4;
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.input-prefix-group input {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  flex: 1;
+  min-width: 0;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

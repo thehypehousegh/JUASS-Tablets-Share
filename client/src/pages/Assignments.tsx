@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiDownload, apiGet, apiSend, ApiError } from "../api";
 import StatusBadge from "../components/StatusBadge";
 import ScanInput from "../components/ScanInput";
+import { embossmentYearSuffix, previewEmbossmentNumber } from "../lib/embossment";
 
 interface Assignment {
   id: string;
@@ -218,7 +219,7 @@ export default function Assignments() {
 function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment; onClose: () => void; onDone: () => void }) {
   const [imei, setImei] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
-  const [embossmentNumber, setEmbossmentNumber] = useState("");
+  const [embossmentDeviceNumber, setEmbossmentDeviceNumber] = useState("");
   const [reason, setReason] = useState("FAULTY");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -240,7 +241,7 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
       await apiSend("POST", `/assignments/${assignment.id}/replace`, {
         imei: imei.trim(),
         serialNumber: serialNumber.trim(),
-        embossmentNumber: embossmentNumber.trim() || undefined,
+        embossmentDeviceNumber: embossmentDeviceNumber.trim() || undefined,
         reason,
         note: note.trim() || undefined,
       });
@@ -288,7 +289,27 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
         <ScanInput label="New Serial Number" value={serialNumber} onChange={setSerialNumber} required />
         <div className="field">
           <label>New Embossment Number</label>
-          <input type="text" value={embossmentNumber} onChange={(e) => setEmbossmentNumber(e.target.value)} />
+          {embossmentYearSuffix(assignment.student.admissionYear) ? (
+            <>
+              <div className="input-prefix-group">
+                <span className="input-prefix">JUASS/SM1/{embossmentYearSuffix(assignment.student.admissionYear)}/</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={embossmentDeviceNumber}
+                  onChange={(e) => setEmbossmentDeviceNumber(e.target.value.replace(/\D/g, ""))}
+                  placeholder="0001"
+                />
+              </div>
+              {embossmentDeviceNumber.trim() && (
+                <p className="hint-text">
+                  Will be recorded as {previewEmbossmentNumber(assignment.student.admissionYear, embossmentDeviceNumber)}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="hint-text">Set this student's Year Group before entering an embossment number.</p>
+          )}
         </div>
         {error && <p className="error-text">{error}</p>}
         <button type="submit" className="btn-primary" disabled={submitting}>

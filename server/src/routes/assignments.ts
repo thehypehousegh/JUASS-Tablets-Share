@@ -5,6 +5,7 @@ import { prisma } from "../db";
 import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { computeFormStatus } from "../utils/academicYear";
+import { buildEmbossmentNumber } from "../utils/embossment";
 
 const router = Router();
 router.use(requireAuth);
@@ -13,7 +14,7 @@ const createSchema = z.object({
   studentIndexNumber: z.string().min(1),
   imei: z.string().min(5),
   serialNumber: z.string().min(3),
-  embossmentNumber: z.string().optional(),
+  embossmentDeviceNumber: z.string().optional(),
   dateAssigned: z.string().optional(),
 });
 
@@ -23,7 +24,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
-    const { studentIndexNumber, imei, serialNumber, embossmentNumber, dateAssigned } = parsed.data;
+    const { studentIndexNumber, imei, serialNumber, embossmentDeviceNumber, dateAssigned } = parsed.data;
 
     const student = await prisma.student.findUnique({ where: { indexNumber: studentIndexNumber } });
     if (!student) return res.status(404).json({ error: "No student found with this index number" });
@@ -39,6 +40,13 @@ router.post(
     });
     if (existingActive) {
       return res.status(409).json({ error: "This student already has an active device assigned" });
+    }
+
+    let embossmentNumber: string | undefined;
+    if (embossmentDeviceNumber?.trim()) {
+      const built = buildEmbossmentNumber(student.admissionYear, embossmentDeviceNumber);
+      if (!built.ok) return res.status(400).json({ error: built.error });
+      embossmentNumber = built.value;
     }
 
     const assignment = await prisma.deviceAssignment
@@ -174,7 +182,7 @@ const replaceSchema = z
   .object({
     imei: z.string().min(5),
     serialNumber: z.string().min(3),
-    embossmentNumber: z.string().optional(),
+    embossmentDeviceNumber: z.string().optional(),
     reason: z.enum(["FAULTY", "MISSING", "OTHER"]),
     note: z.string().trim().optional(),
   })
@@ -193,8 +201,15 @@ router.post(
     const parsed = replaceSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
 
-    const old = await prisma.deviceAssignment.findUnique({ where: { id: req.params.id } });
+    const old = await prisma.deviceAssignment.findUnique({ where: { id: req.params.id }, include: { student: true } });
     if (!old) return res.status(404).json({ error: "Assignment not found" });
+
+    let embossmentNumber: string | undefined;
+    if (parsed.data.embossmentDeviceNumber?.trim()) {
+      const built = buildEmbossmentNumber(old.student.admissionYear, parsed.data.embossmentDeviceNumber);
+      if (!built.ok) return res.status(400).json({ error: built.error });
+      embossmentNumber = built.value;
+    }
 
     const [, fresh] = await prisma.$transaction([
       prisma.deviceAssignment.update({
@@ -212,7 +227,7 @@ router.post(
           distributorId: req.user!.id,
           imei: parsed.data.imei,
           serialNumber: parsed.data.serialNumber,
-          embossmentNumber: parsed.data.embossmentNumber,
+          embossmentNumber,
         },
         include: { student: true, distributor: { select: { name: true } } },
       }),

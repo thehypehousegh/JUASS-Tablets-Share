@@ -203,15 +203,35 @@ async function fetchRows(
         OR: studentTextSearch,
         assignments: type === "not_assigned" ? { none: { status: "WITH_STUDENT" } } : undefined,
       },
-      include: type === "all_students" ? { assignments: { where: { status: "WITH_STUDENT" }, take: 1 } } : undefined,
+      include:
+        type === "all_students"
+          ? { assignments: { where: { status: "WITH_STUDENT" }, take: 1, include: { distributor: { select: { name: true } } } } }
+          : undefined,
       orderBy: [{ admissionYear: "desc" }, { className: "asc" }, { fullName: "asc" }],
       take: 10000,
     });
     return students.map((s) => {
       const row = { ...blankRow(catalog), ...studentFields(s) };
       if (type === "all_students") {
-        const active = (s as unknown as { assignments?: { status: string }[] }).assignments?.[0];
+        const active = (
+          s as unknown as {
+            assignments?: {
+              imei: string;
+              serialNumber: string;
+              embossmentNumber: string | null;
+              dateAssigned: Date;
+              distributor: { name: string };
+            }[];
+          }
+        ).assignments?.[0];
         row.assignmentStatus = active ? "With Student" : "Not Assigned";
+        if (active) {
+          row.distributorName = active.distributor.name;
+          row.imei = active.imei;
+          row.serialNumber = active.serialNumber;
+          row.embossmentNumber = active.embossmentNumber ?? "";
+          row.dateAssigned = dateStr(active.dateAssigned);
+        }
       }
       return row;
     });

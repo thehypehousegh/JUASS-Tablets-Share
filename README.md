@@ -324,6 +324,17 @@ WITH_STUDENT and have no Missing report already flagging it) — its button
 renders in red only when that report actually has matching records,
 neutral otherwise.
 
+**Embossment numbers** follow a fixed school code, `JUASS/SM1/<YY>/<NNNN>`
+(e.g. `JUASS/SM1/26/0001`) — built server-side
+(`server/src/utils/embossment.ts`) from the hardcoded `JUASS/SM1` prefix,
+the last two digits of the student's own Year Group, and a device number
+the distributor types, zero-padded to 4 digits. The distributor only ever
+enters that device number (on both Assign Device and Replace) — the full
+code is what's actually stored and what shows up in every report and
+export, so it can never be typed inconsistently or drift from the
+student's real Year Group. A student with no Year Group set can't be
+given an embossment number until one is added.
+
 ## Security notes
 
 - Login is by selecting your name from a dropdown (populated from active
