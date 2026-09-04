@@ -305,6 +305,17 @@ had, in order, with why each one left) is one click away via the
 **History** button, which also surfaces any faulty/missing issue reports
 tied to each device.
 
+A 🔄 **Reset** icon (Super Admin only, next to History) undoes an
+assignment made in error — wrong student, mistyped device details, a
+duplicate test entry. Unlike Mark Returned, which closes out the
+assignment but keeps it in history, Reset deletes the student's entire
+device-assignment history outright, returning them to "Not yet received"
+and freeing their IMEI/Serial Number/Embossment Number for reuse (all
+three are globally unique, so a mistaken entry would otherwise block that
+device forever). It shows a confirmation notice before committing and is
+logged to the audit trail — use Mark Returned instead for a device that's
+genuinely coming back.
+
 **Replace** and **Mark Returned** both require a reason before they can be
 confirmed — Replace: Faulty / Missing / Other; Return: Completed /
 Withdrawn / Other — plus an optional short note (required when "Other" is

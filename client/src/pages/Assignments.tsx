@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiDownload, apiGet, apiSend, ApiError } from "../api";
+import { useAuth } from "../auth/AuthContext";
 import StatusBadge from "../components/StatusBadge";
 import DeviceCodeFields from "../components/DeviceCodeFields";
 import { embossmentYearSuffix, previewEmbossmentNumber } from "../lib/embossment";
@@ -40,6 +41,8 @@ const REPLACEMENT_REASON_LABELS: Record<string, string> = { FAULTY: "Faulty", MI
 const RETURN_REASON_LABELS: Record<string, string> = { COMPLETED: "Completed", WITHDRAWN: "Withdrawn", OTHER: "Other" };
 
 export default function Assignments() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "SUPER_ADMIN";
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -51,6 +54,7 @@ export default function Assignments() {
   const [replacing, setReplacing] = useState<Assignment | null>(null);
   const [returning, setReturning] = useState<Assignment | null>(null);
   const [historyFor, setHistoryFor] = useState<Assignment | null>(null);
+  const [resetting, setResetting] = useState<Assignment | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function buildParams() {
@@ -177,6 +181,17 @@ export default function Assignments() {
                     <button className="btn-link" onClick={() => setHistoryFor(a)}>
                       History
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        title="Reset — clear this student's device history"
+                        aria-label="Reset assignment status"
+                        onClick={() => setResetting(a)}
+                      >
+                        🔄
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -213,6 +228,64 @@ export default function Assignments() {
       )}
 
       {historyFor && <HistoryModal assignment={historyFor} onClose={() => setHistoryFor(null)} />}
+
+      {resetting && (
+        <ResetModal
+          assignment={resetting}
+          onClose={() => setResetting(null)}
+          onDone={() => {
+            setResetting(null);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ResetModal({ assignment, onClose, onDone }: { assignment: Assignment; onClose: () => void; onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function confirmReset() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await apiSend("POST", `/assignments/reset/${assignment.student.id}`);
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reset this student's assignment status");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal">
+        <div className="modal-header">
+          <h3>Reset Assignment — {assignment.student.fullName}</h3>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <p className="warn-text">
+          This permanently clears {assignment.student.fullName}'s entire device-assignment history — the current
+          device ({assignment.serialNumber}) and any earlier ones — and returns their status to{" "}
+          <strong>Not yet received</strong>, making them eligible for a fresh assignment. Use this only to undo a
+          mistaken entry (wrong student, mistyped device details, a duplicate test entry) — for a device that's
+          genuinely coming back, use Mark Returned instead so the history is kept. This cannot be undone.
+        </p>
+        {error && <p className="error-text">{error}</p>}
+        <div className="actions-cell">
+          <button type="button" className="btn-danger" onClick={confirmReset} disabled={submitting}>
+            {submitting ? "Resetting…" : "Reset Assignment Status"}
+          </button>
+          <button type="button" className="btn-link" onClick={onClose} disabled={submitting}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

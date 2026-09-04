@@ -7,6 +7,8 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { computeFormStatus } from "../utils/academicYear";
 import { buildEmbossmentNumber } from "../utils/embossment";
 import { imeiError, serialError } from "../utils/deviceCodes";
+import { recordAudit } from "../utils/auditLog";
+import { resetStudentAssignments } from "../utils/studentDelete";
 
 const router = Router();
 router.use(requireAuth);
@@ -146,6 +148,34 @@ router.get(
     });
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
     res.json(assignment);
+  })
+);
+
+// Wipes a student's entire device-assignment history (current + past),
+// restoring them to "Not yet received" so they're eligible for a fresh
+// assignment — for undoing an assignment made in error (wrong student,
+// mistyped device details, a duplicate test entry). Unlike Mark Returned,
+// this deletes the row rather than closing it out, which also frees its
+// IMEI/Serial Number/Embossment Number for reuse (all three are globally
+// unique, so a mistaken entry would otherwise block that device forever).
+router.post(
+  "/reset/:studentId",
+  requireRole("SUPER_ADMIN"),
+  asyncHandler(async (req, res) => {
+    const student = await prisma.student.findUnique({ where: { id: req.params.studentId } });
+    if (!student) return res.status(404).json({ error: "Student not found" });
+
+    const counts = await resetStudentAssignments(student.id);
+    if (counts.deletedAssignments > 0) {
+      await recordAudit(req, {
+        action: "assignment.reset",
+        targetType: "Student",
+        targetId: student.id,
+        targetLabel: `${student.indexNumber} — ${student.fullName}`,
+        details: counts,
+      });
+    }
+    res.json(counts);
   })
 );
 
