@@ -67,7 +67,9 @@ export function createApp() {
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(err);
     if (err?.message?.includes("Unique constraint")) {
-      return res.status(409).json({ error: "This IMEI or Serial Number is already assigned to another student" });
+      return res
+        .status(409)
+        .json({ error: "This IMEI, Serial Number, or Embossment Number is already assigned to another device" });
     }
     res.status(500).json({ error: "Something went wrong on the server" });
   });

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiSend, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
-import ScanInput from "../components/ScanInput";
+import DeviceCodeFields from "../components/DeviceCodeFields";
 import StatusBadge from "../components/StatusBadge";
 import { isOnline, queueAssignment } from "../lib/offlineQueue";
 import { embossmentYearSuffix, previewEmbossmentNumber } from "../lib/embossment";
+import { imeiError, serialError } from "../lib/deviceCodes";
 
 interface StudentRecord {
   id: string;
@@ -215,12 +216,26 @@ export default function AssignmentForm() {
       setFormError("Enter or scan the Device IMEI and Serial Number");
       return;
     }
+    const imeiInvalid = imeiError(imei);
+    if (imeiInvalid) {
+      setFormError(imeiInvalid);
+      return;
+    }
+    const serialInvalid = serialError(serialNumber);
+    if (serialInvalid) {
+      setFormError(serialInvalid);
+      return;
+    }
+    if (!embossmentDeviceNumber.trim()) {
+      setFormError("Enter the device number for the Embossment Number");
+      return;
+    }
 
     const body = {
       studentIndexNumber: student.indexNumber,
       imei: imei.trim(),
       serialNumber: serialNumber.trim(),
-      embossmentDeviceNumber: embossmentDeviceNumber.trim() || undefined,
+      embossmentDeviceNumber: embossmentDeviceNumber.trim(),
       dateAssigned,
     };
 
@@ -258,7 +273,8 @@ export default function AssignmentForm() {
 
   const activeAssignment = student?.assignments.find((a) => a.status === "WITH_STUDENT");
   const hasCompleted = student?.formStatus === "COMPLETED";
-  const blocked = !!activeAssignment || hasCompleted;
+  const missingYearGroup = !!student && !embossmentYearSuffix(student.admissionYear);
+  const blocked = !!activeAssignment || hasCompleted || missingYearGroup;
 
   return (
     <div className="page">
@@ -343,6 +359,13 @@ export default function AssignmentForm() {
               This student's Year Group ({student.admissionYear}) means they've completed the 3-year program and
               should not be assigned a device. If this is an error, correct their Year Group from "Edit Details" or
               Student Records.
+            </p>
+          )}
+
+          {!hasCompleted && missingYearGroup && (
+            <p className="error-text">
+              This student has no Year Group set, so an Embossment Number can't be generated for them. Set their Year
+              Group from "Edit Details" above before assigning a device.
             </p>
           )}
 
@@ -444,10 +467,15 @@ export default function AssignmentForm() {
           <form onSubmit={handleSubmit} className={blocked ? "disabled-form" : undefined}>
             <h4>Device Details (recorded at distribution)</h4>
             <div className="grid-2">
-              <ScanInput label="Device IMEI" value={imei} onChange={setImei} required />
-              <ScanInput label="Serial Number" value={serialNumber} onChange={setSerialNumber} required />
+              <DeviceCodeFields
+                imei={imei}
+                onImeiChange={setImei}
+                serialNumber={serialNumber}
+                onSerialChange={setSerialNumber}
+                required
+              />
               <div className="field">
-                <label>Embossment Number</label>
+                <label>Embossment Number *</label>
                 {embossmentYearSuffix(student.admissionYear) ? (
                   <>
                     <div className="input-prefix-group">
@@ -455,6 +483,7 @@ export default function AssignmentForm() {
                       <input
                         type="text"
                         inputMode="numeric"
+                        required
                         value={embossmentDeviceNumber}
                         onChange={(e) => setEmbossmentDeviceNumber(e.target.value.replace(/\D/g, ""))}
                         placeholder="0001"
@@ -467,7 +496,7 @@ export default function AssignmentForm() {
                     )}
                   </>
                 ) : (
-                  <p className="hint-text">Set this student's Year Group before entering an embossment number.</p>
+                  <p className="hint-text">Set this student's Year Group before an embossment number can be entered.</p>
                 )}
               </div>
               <div className="field">

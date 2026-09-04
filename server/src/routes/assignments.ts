@@ -6,15 +6,18 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { computeFormStatus } from "../utils/academicYear";
 import { buildEmbossmentNumber } from "../utils/embossment";
+import { imeiError, serialError } from "../utils/deviceCodes";
 
 const router = Router();
 router.use(requireAuth);
 
 const createSchema = z.object({
   studentIndexNumber: z.string().min(1),
-  imei: z.string().min(5),
-  serialNumber: z.string().min(3),
-  embossmentDeviceNumber: z.string().optional(),
+  imei: z.string({ required_error: "Enter the device IMEI" }).min(1, "Enter the device IMEI"),
+  serialNumber: z.string({ required_error: "Enter the device Serial Number" }).min(1, "Enter the device Serial Number"),
+  embossmentDeviceNumber: z
+    .string({ required_error: "Enter the device number for the embossment code" })
+    .min(1, "Enter the device number for the embossment code"),
   dateAssigned: z.string().optional(),
 });
 
@@ -25,6 +28,11 @@ router.post(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
     const { studentIndexNumber, imei, serialNumber, embossmentDeviceNumber, dateAssigned } = parsed.data;
+
+    const imeiInvalid = imeiError(imei);
+    if (imeiInvalid) return res.status(400).json({ error: imeiInvalid });
+    const serialInvalid = serialError(serialNumber);
+    if (serialInvalid) return res.status(400).json({ error: serialInvalid });
 
     const student = await prisma.student.findUnique({ where: { indexNumber: studentIndexNumber } });
     if (!student) return res.status(404).json({ error: "No student found with this index number" });
@@ -42,12 +50,9 @@ router.post(
       return res.status(409).json({ error: "This student already has an active device assigned" });
     }
 
-    let embossmentNumber: string | undefined;
-    if (embossmentDeviceNumber?.trim()) {
-      const built = buildEmbossmentNumber(student.admissionYear, embossmentDeviceNumber);
-      if (!built.ok) return res.status(400).json({ error: built.error });
-      embossmentNumber = built.value;
-    }
+    const built = buildEmbossmentNumber(student.admissionYear, embossmentDeviceNumber);
+    if (!built.ok) return res.status(400).json({ error: built.error });
+    const embossmentNumber = built.value;
 
     const assignment = await prisma.deviceAssignment
       .create({
@@ -180,9 +185,11 @@ router.post(
 
 const replaceSchema = z
   .object({
-    imei: z.string().min(5),
-    serialNumber: z.string().min(3),
-    embossmentDeviceNumber: z.string().optional(),
+    imei: z.string({ required_error: "Enter the device IMEI" }).min(1, "Enter the device IMEI"),
+    serialNumber: z.string({ required_error: "Enter the device Serial Number" }).min(1, "Enter the device Serial Number"),
+    embossmentDeviceNumber: z
+      .string({ required_error: "Enter the device number for the embossment code" })
+      .min(1, "Enter the device number for the embossment code"),
     reason: z.enum(["FAULTY", "MISSING", "OTHER"]),
     note: z.string().trim().optional(),
   })
@@ -201,15 +208,17 @@ router.post(
     const parsed = replaceSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid data" });
 
+    const imeiInvalid = imeiError(parsed.data.imei);
+    if (imeiInvalid) return res.status(400).json({ error: imeiInvalid });
+    const serialInvalid = serialError(parsed.data.serialNumber);
+    if (serialInvalid) return res.status(400).json({ error: serialInvalid });
+
     const old = await prisma.deviceAssignment.findUnique({ where: { id: req.params.id }, include: { student: true } });
     if (!old) return res.status(404).json({ error: "Assignment not found" });
 
-    let embossmentNumber: string | undefined;
-    if (parsed.data.embossmentDeviceNumber?.trim()) {
-      const built = buildEmbossmentNumber(old.student.admissionYear, parsed.data.embossmentDeviceNumber);
-      if (!built.ok) return res.status(400).json({ error: built.error });
-      embossmentNumber = built.value;
-    }
+    const built = buildEmbossmentNumber(old.student.admissionYear, parsed.data.embossmentDeviceNumber);
+    if (!built.ok) return res.status(400).json({ error: built.error });
+    const embossmentNumber = built.value;
 
     const [, fresh] = await prisma.$transaction([
       prisma.deviceAssignment.update({

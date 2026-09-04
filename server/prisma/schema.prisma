@@ -126,6 +126,7 @@ model DeviceAssignment {
   @@index([distributorId])
   @@unique([imei])
   @@unique([serialNumber])
+  @@unique([embossmentNumber])
 }
 
 model DeviceIssueReport {

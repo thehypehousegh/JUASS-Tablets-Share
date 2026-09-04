@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiDownload, apiGet, apiSend, ApiError } from "../api";
 import StatusBadge from "../components/StatusBadge";
-import ScanInput from "../components/ScanInput";
+import DeviceCodeFields from "../components/DeviceCodeFields";
 import { embossmentYearSuffix, previewEmbossmentNumber } from "../lib/embossment";
+import { imeiError, serialError } from "../lib/deviceCodes";
 
 interface Assignment {
   id: string;
@@ -224,12 +225,27 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const missingYearGroup = !embossmentYearSuffix(assignment.student.admissionYear);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!imei.trim() || !serialNumber.trim()) {
       setError("Enter the new device's IMEI and Serial Number");
+      return;
+    }
+    const imeiInvalid = imeiError(imei);
+    if (imeiInvalid) {
+      setError(imeiInvalid);
+      return;
+    }
+    const serialInvalid = serialError(serialNumber);
+    if (serialInvalid) {
+      setError(serialInvalid);
+      return;
+    }
+    if (!embossmentDeviceNumber.trim()) {
+      setError("Enter the device number for the Embossment Number");
       return;
     }
     if (reason === "OTHER" && !note.trim()) {
@@ -241,7 +257,7 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
       await apiSend("POST", `/assignments/${assignment.id}/replace`, {
         imei: imei.trim(),
         serialNumber: serialNumber.trim(),
-        embossmentDeviceNumber: embossmentDeviceNumber.trim() || undefined,
+        embossmentDeviceNumber: embossmentDeviceNumber.trim(),
         reason,
         note: note.trim() || undefined,
       });
@@ -285,10 +301,15 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
             placeholder={reason === "OTHER" ? "Briefly explain why" : "Any extra detail"}
           />
         </div>
-        <ScanInput label="New Device IMEI" value={imei} onChange={setImei} required />
-        <ScanInput label="New Serial Number" value={serialNumber} onChange={setSerialNumber} required />
+        <DeviceCodeFields
+          imei={imei}
+          onImeiChange={setImei}
+          serialNumber={serialNumber}
+          onSerialChange={setSerialNumber}
+          required
+        />
         <div className="field">
-          <label>New Embossment Number</label>
+          <label>New Embossment Number *</label>
           {embossmentYearSuffix(assignment.student.admissionYear) ? (
             <>
               <div className="input-prefix-group">
@@ -296,6 +317,7 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
                 <input
                   type="text"
                   inputMode="numeric"
+                  required
                   value={embossmentDeviceNumber}
                   onChange={(e) => setEmbossmentDeviceNumber(e.target.value.replace(/\D/g, ""))}
                   placeholder="0001"
@@ -308,11 +330,14 @@ function ReplaceModal({ assignment, onClose, onDone }: { assignment: Assignment;
               )}
             </>
           ) : (
-            <p className="hint-text">Set this student's Year Group before entering an embossment number.</p>
+            <p className="error-text">
+              This student has no Year Group set, so an Embossment Number can't be generated. Set their Year Group
+              from Student Records before replacing this device.
+            </p>
           )}
         </div>
         {error && <p className="error-text">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={submitting}>
+        <button type="submit" className="btn-primary" disabled={submitting || missingYearGroup}>
           {submitting ? "Saving…" : "Confirm Replacement"}
         </button>
       </form>

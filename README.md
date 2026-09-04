@@ -335,6 +335,25 @@ export, so it can never be typed inconsistently or drift from the
 student's real Year Group. A student with no Year Group set can't be
 given an embossment number until one is added.
 
+**Device IMEI, Serial Number, and Embossment Number are all required and
+globally unique** when a device is assigned or replaced (enforced both
+client-side and with `@@unique` constraints in the schema) — the server
+rejects a second device sharing any of the three with an existing one. IMEI
+must be exactly 15 digits (the standard length); Serial Number must be
+exactly 18 characters, matching this school's tablet batch label format
+(`server/src/utils/deviceCodes.ts`, mirrored in
+`client/src/lib/deviceCodes.ts`) — either field shows an inline error the
+moment its length or character set doesn't match, on top of the server's
+own check.
+
+**Scan-to-fill** (the 📷 button next to Device IMEI/Serial Number) reads
+whichever barcode the camera is pointed at, classifies it by format (15
+digits → IMEI, 18 characters → Serial Number), and fills the matching
+field automatically — it doesn't matter which field's scan button was
+pressed. A device label carries two separate barcodes, so the scanner
+keeps running after the first one until both fields that were empty when
+it opened are filled, letting one scan session capture both codes.
+
 ## Security notes
 
 - Login is by selecting your name from a dropdown (populated from active
